@@ -5,7 +5,7 @@ colorFrom: blue
 colorTo: yellow
 sdk: gradio
 sdk_version: 5.43.1
-app_file: app.py
+app_file: test.py
 pinned: false
 license: apache-2.0
 header: mini           # <-- makes the header minimal
