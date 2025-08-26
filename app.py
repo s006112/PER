@@ -189,8 +189,8 @@ with gr.Blocks(title="PDF 原始内容提取（Gradio 单文件）") as demo:
     btn = gr.Button("提交 / Submit")
     
     meta = gr.Markdown()
+    openai_response_box = gr.Textbox(label="AI 摘要", lines=10, show_copy_button=True)
     original_text_box = gr.Textbox(label="提取结果（原始文本）", lines=10, show_copy_button=True)
-    openai_response_box = gr.Textbox(label="OpenAI 摘要", lines=10, show_copy_button=True)
 
     btn.click(handle_upload, inputs=inp, outputs=[meta, original_text_box, openai_response_box])
 
