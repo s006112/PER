@@ -8,7 +8,6 @@ Python 3.10；优先 PyMuPDF，回退 pypdf
 from __future__ import annotations
 import os, io, hashlib, datetime
 from typing import Dict, Tuple
-import re
 
 # 解析后端优先级：PyMuPDF -> pypdf
 try:
@@ -70,124 +69,39 @@ def extract_pdf_text_from_bytes(data: bytes) -> Tuple[str, str]:
     chunks = [f"=== Page {i} ===\n{pages[i]}" for i in sorted(pages)]
     return engine, "\n\n".join(chunks)
 
-def format_to_markdown(raw_text: str) -> str:
+def handle_upload(file_path: str) -> Tuple[str, str]:
     """
-    Converts raw text extracted from PDF into a markdown format with proper alignment.
-    This function fixes the issues in extracting parameters and formats them correctly.
-    """
-    # Split the raw text by lines
-    lines = raw_text.splitlines()
-    markdown_output = ""
-
-    # Initialize placeholders for multi-line parameters
-    color_params = []
-    light_params = []
-    electrical_params = []
-    
-    # Iterating over each line and correctly capturing the parameters
-    for line in lines:
-        line = line.strip()
-        
-        # Correctly capture values like 'x =', 'y =', 'CCT =', etc.
-        if line.startswith("x ="):
-            markdown_output += f"x = {line.split('=')[1].strip()}\n"
-        elif line.startswith("y ="):
-            markdown_output += f"y = {line.split('=')[1].strip()}\n"
-        elif "CCT =" in line:
-            markdown_output += f"CCT = {line.split('=')[1].strip()}\n"
-        elif "u'" in line and "v'" in line:
-            uv_values = line.split('=')[1].strip()
-            markdown_output += f"u' = {uv_values.split()[0]}  v' = {uv_values.split()[1]}\n"
-        elif "色差Duv" in line:
-            markdown_output += f"色差Duv = {line.split('=')[1].strip()}\n"
-        elif "主波长" in line:
-            markdown_output += f"主波长: λd = {line.split('=')[1].strip()}\n"
-        elif "色纯度" in line:
-            markdown_output += f"色纯度: Purity = {line.split('=')[1].strip()}\n"
-        elif "峰值波长" in line:
-            markdown_output += f"峰值波长: λp = {line.split('=')[1].strip()}\n"
-        elif "显色指数" in line:
-            markdown_output += f"显色指数: Ra = {line.split('=')[1].strip()}\n"
-        
-        # Capture 光度参数 (light parameters) and 电参数 (electrical parameters)
-        elif "光通量" in line or "光效" in line or "辐射通量" in line:
-            light_params.append(line.strip())
-        elif "电压" in line or "电流" in line or "功率" in line or "功率因数" in line:
-            electrical_params.append(line.strip())
-        
-        # Capture the product information and other details
-        elif "白光分类" in line:
-            markdown_output += f"白光分类: {line.split(':')[1].strip()}\n"
-        elif "产品型号" in line:
-            markdown_output += f"产品型号: {line.split(':')[1].strip()}\n"
-        elif "产品编号" in line:
-            markdown_output += f"产品编号: {line.split(':')[1].strip()}\n"
-        elif "测试人员" in line:
-            markdown_output += f"测试人员: {line.split(':')[1].strip()}\n"
-        elif "测试日期" in line:
-            markdown_output += f"测试日期: {line.split(':')[1].strip()}\n"
-        elif "制造厂商" in line:
-            markdown_output += f"制造厂商: {line.split(':')[1].strip()}\n"
-        elif "备注" in line:
-            markdown_output += f"备注: {line.split(':')[1].strip()}\n"
-        elif "环境温度" in line:
-            markdown_output += f"环境温度: {line.split(':')[1].strip()}\n"
-        elif "环境湿度" in line:
-            markdown_output += f"环境湿度: {line.split(':')[1].strip()}\n"
-    
-    # Formatting light parameters in markdown
-    if light_params:
-        markdown_output += "\n#### 光度参数\n"
-        for param in light_params:
-            markdown_output += f"{param}\n"
-    
-    # Formatting electrical parameters in markdown
-    if electrical_params:
-        markdown_output += "\n#### 电参数\n"
-        for param in electrical_params:
-            markdown_output += f"{param}\n"
-    
-    return markdown_output
-
-def handle_upload_and_format(file_path: str) -> Tuple[str, str, str]:
-    """
-    Process the uploaded PDF and return both raw and formatted markdown text.
+    Gradio 回调：接收文件路径，读取 bytes，解析
     """
     if not file_path or not os.path.isfile(file_path):
-        return "**错误**：未选择文件或文件不存在。", "", ""
+        return "**错误**：未选择文件或文件不存在。", ""
 
     ext = os.path.splitext(file_path.lower())[1]
     if ext not in ALLOWED_EXT:
-        return "**错误**：仅支持 PDF。", "", ""
+        return "**错误**：仅支持 PDF。", ""
 
     with open(file_path, "rb") as f:
         data = f.read()
     if not data:
-        return "**错误**：文件内容为空。", "", ""
+        return "**错误**：文件内容为空。", ""
 
-    engine, raw_text = extract_pdf_text_from_bytes(data)
-    formatted_markdown = format_to_markdown(raw_text)
-
+    engine, text = extract_pdf_text_from_bytes(data)
     meta = (
         f"**文件**：{os.path.basename(file_path)}  \n"
         f"**大小**：{len(data)} bytes  \n"
         f"**解析引擎**：{engine}"
     )
-
-    return meta, raw_text, formatted_markdown
+    return meta, text
 
 with gr.Blocks(title="PDF 原始内容提取（Gradio 单文件）") as demo:
-    gr.Markdown("上传 PDF → 点击提交 → 同页显示**未清洗的原始文本**，并且转换为**Markdown 格式**，并进行结构化展示。")
-    
+    gr.Markdown("上传 PDF → 点击提交 → 同页显示**未清洗的原始文本**。")
     with gr.Row():
         inp = gr.File(label="选择 PDF 文件", file_types=[".pdf"], type="filepath")
-        
     btn = gr.Button("提交 / Submit")
     meta = gr.Markdown()
-    raw_out = gr.Textbox(label="提取结果（原始文本）", lines=5, show_copy_button=True)
-    markdown_out = gr.Textbox(label="提取结果 (Markdown format)", lines=10, show_copy_button=True)
-    
-    btn.click(handle_upload_and_format, inputs=inp, outputs=[meta, raw_out, markdown_out])
+    out = gr.Textbox(label="提取结果（原始文本）", lines=5, show_copy_button=True)
+
+    btn.click(handle_upload, inputs=inp, outputs=[meta, out])
 
 if __name__ == "__main__":
     demo.launch()
