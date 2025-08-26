@@ -99,7 +99,7 @@ with gr.Blocks(title="PDF 原始内容提取（Gradio 单文件）") as demo:
         inp = gr.File(label="选择 PDF 文件", file_types=[".pdf"], type="filepath")
     btn = gr.Button("提交 / Submit")
     meta = gr.Markdown()
-    out = gr.Textbox(label="提取结果（原始文本）", lines=10, show_copy_button=True)
+    out = gr.Textbox(label="提取结果（原始文本）", lines=5, show_copy_button=True)
 
     btn.click(handle_upload, inputs=inp, outputs=[meta, out])
 
