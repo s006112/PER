@@ -145,7 +145,7 @@ with gr.Blocks(title="PDF 原始内容提取（Gradio 单文件）") as demo:
     
     meta = gr.Markdown()
     summary_points_box  = gr.Textbox(label="Photometric summary", lines=10, show_copy_button=True)
-    markdown_summary_box = gr.Textbox(label="Markdown summary (Prompt_md.txt)", lines=10, show_copy_button=True)
+    markdown_summary_box = gr.Textbox(label="Markdown summary", lines=10, show_copy_button=True)
     original_text_box   = gr.Textbox(label="Sphere PDF extraction", lines=10, show_copy_button=True)
 
     btn.click(handle_upload, inputs=inp, outputs=[meta, original_text_box, markdown_summary_box, summary_points_box])
