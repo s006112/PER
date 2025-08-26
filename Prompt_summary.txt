@@ -1,0 +1,8 @@
+• Firstly Summarize in detail the photometric numerical performance clearly in concise English paragraph form
+State follow in point form
+• Highlight only outstanding performance metrics
+• Highlight any abnormal values, outliers, or inconsistencies that may be easily overlooked (e.g., sudden drops, unusually high/low readings, irregular distribution patterns)
+• Point out deviations from expected standards, benchmarks, or design specifications
+• Maintain professional, technical tone with focus on clarity and precision
+• Ensure the list is structured so that critical anomalies stand out distinctly from normal performance data
+

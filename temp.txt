@@ -1,5 +1,16 @@
 Please summary the photometric numerical performance in paragragh format, in English
 
+
+
+• Summarize the photometric numerical performance clearly in concise English point form
+• Identify key performance metrics such as intensity, efficiency, luminous flux, distribution, uniformity, and color characteristics
+• Highlight any abnormal values, outliers, or inconsistencies that may be easily overlooked (e.g., sudden drops, unusually high/low readings, irregular distribution patterns)
+• Point out deviations from expected standards, benchmarks, or design specifications
+• Maintain professional, technical tone with focus on clarity and precision
+• Ensure the list is structured so that critical anomalies stand out distinctly from normal performance data
+
+
+
 按以下參考格式提取內容並輸出成以下markdown format
 
 # 远方 (EVERFINE) HAAS-1200 光色电测试报告
