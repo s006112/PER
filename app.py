@@ -72,66 +72,80 @@ def extract_pdf_text_from_bytes(data: bytes) -> Tuple[str, str]:
 
 def format_to_markdown(raw_text: str) -> str:
     """
-    Converts raw text extracted from PDF into a markdown format similar to 提取结果 (Markdown format).txt
+    Converts raw text extracted from PDF into a markdown format with proper alignment.
+    This function fixes the issues in extracting parameters and formats them correctly.
     """
-    # Create a cleaner structure from raw text
+    # Split the raw text by lines
     lines = raw_text.splitlines()
     markdown_output = ""
 
+    # Initialize placeholders for multi-line parameters
+    color_params = []
+    light_params = []
+    electrical_params = []
+    
+    # Iterating over each line and correctly capturing the parameters
     for line in lines:
-        # Extract the necessary parameters and convert to markdown format
-        if 'x =' in line:
+        line = line.strip()
+        
+        # Correctly capture values like 'x =', 'y =', 'CCT =', etc.
+        if line.startswith("x ="):
             markdown_output += f"x = {line.split('=')[1].strip()}\n"
-        elif 'y =' in line:
+        elif line.startswith("y ="):
             markdown_output += f"y = {line.split('=')[1].strip()}\n"
-        elif 'CCT =' in line:
+        elif "CCT =" in line:
             markdown_output += f"CCT = {line.split('=')[1].strip()}\n"
-        elif 'u\'' in line:
-            markdown_output += f"u' = {line.split('=')[1].strip()}\n"
-        elif 'v\'' in line:
-            markdown_output += f"v' = {line.split('=')[1].strip()}\n"
-        elif '色差Duv' in line:
+        elif "u'" in line and "v'" in line:
+            uv_values = line.split('=')[1].strip()
+            markdown_output += f"u' = {uv_values.split()[0]}  v' = {uv_values.split()[1]}\n"
+        elif "色差Duv" in line:
             markdown_output += f"色差Duv = {line.split('=')[1].strip()}\n"
-        elif '主波长' in line:
+        elif "主波长" in line:
             markdown_output += f"主波长: λd = {line.split('=')[1].strip()}\n"
-        elif '色纯度' in line:
+        elif "色纯度" in line:
             markdown_output += f"色纯度: Purity = {line.split('=')[1].strip()}\n"
-        elif '峰值波长' in line:
+        elif "峰值波长" in line:
             markdown_output += f"峰值波长: λp = {line.split('=')[1].strip()}\n"
-        elif '显色指数' in line:
+        elif "显色指数" in line:
             markdown_output += f"显色指数: Ra = {line.split('=')[1].strip()}\n"
-        elif '光通量' in line:
-            markdown_output += f"光通量 Φ = {line.split('=')[1].strip()}\n"
-        elif '光效' in line:
-            markdown_output += f"光效 = {line.split('=')[1].strip()}\n"
-        elif '辐射通量' in line:
-            markdown_output += f"辐射通量 Φe = {line.split('=')[1].strip()}\n"
-        elif '电压' in line:
-            markdown_output += f"电压 V = {line.split('=')[1].strip()}\n"
-        elif '电流' in line:
-            markdown_output += f"电流 I = {line.split('=')[1].strip()}\n"
-        elif '功率' in line:
-            markdown_output += f"功率 P = {line.split('=')[1].strip()}\n"
-        elif '功率因数' in line:
-            markdown_output += f"功率因数 PF = {line.split('=')[1].strip()}\n"
-        elif '白光分类' in line:
+        
+        # Capture 光度参数 (light parameters) and 电参数 (electrical parameters)
+        elif "光通量" in line or "光效" in line or "辐射通量" in line:
+            light_params.append(line.strip())
+        elif "电压" in line or "电流" in line or "功率" in line or "功率因数" in line:
+            electrical_params.append(line.strip())
+        
+        # Capture the product information and other details
+        elif "白光分类" in line:
             markdown_output += f"白光分类: {line.split(':')[1].strip()}\n"
-        elif '产品型号' in line:
+        elif "产品型号" in line:
             markdown_output += f"产品型号: {line.split(':')[1].strip()}\n"
-        elif '产品编号' in line:
+        elif "产品编号" in line:
             markdown_output += f"产品编号: {line.split(':')[1].strip()}\n"
-        elif '测试人员' in line:
+        elif "测试人员" in line:
             markdown_output += f"测试人员: {line.split(':')[1].strip()}\n"
-        elif '测试日期' in line:
+        elif "测试日期" in line:
             markdown_output += f"测试日期: {line.split(':')[1].strip()}\n"
-        elif '制造厂商' in line:
+        elif "制造厂商" in line:
             markdown_output += f"制造厂商: {line.split(':')[1].strip()}\n"
-        elif '备    注' in line:
+        elif "备注" in line:
             markdown_output += f"备注: {line.split(':')[1].strip()}\n"
-        elif '环境温度' in line:
+        elif "环境温度" in line:
             markdown_output += f"环境温度: {line.split(':')[1].strip()}\n"
-        elif '环境湿度' in line:
+        elif "环境湿度" in line:
             markdown_output += f"环境湿度: {line.split(':')[1].strip()}\n"
+    
+    # Formatting light parameters in markdown
+    if light_params:
+        markdown_output += "\n#### 光度参数\n"
+        for param in light_params:
+            markdown_output += f"{param}\n"
+    
+    # Formatting electrical parameters in markdown
+    if electrical_params:
+        markdown_output += "\n#### 电参数\n"
+        for param in electrical_params:
+            markdown_output += f"{param}\n"
     
     return markdown_output
 
