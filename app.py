@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Gradio 单文件：上传 PDF -> 同页显示原始文本，同时保存到 ./archived/
+Gradio 单文件：上传 PDF -> 同页显示原始文本
 Python 3.10；优先 PyMuPDF，回退 pypdf
 """
 
@@ -22,7 +22,6 @@ except Exception:
 import gradio as gr
 
 ALLOWED_EXT = {".pdf"}
-ARCHIVE_DIR = "archived"
 
 def extract_pdf_text_from_bytes(data: bytes) -> Tuple[str, str]:
     """
@@ -72,7 +71,7 @@ def extract_pdf_text_from_bytes(data: bytes) -> Tuple[str, str]:
 
 def handle_upload(file_path: str) -> Tuple[str, str]:
     """
-    Gradio 回调：接收文件路径，读取 bytes，归档并解析
+    Gradio 回调：接收文件路径，读取 bytes，解析
     """
     if not file_path or not os.path.isfile(file_path):
         return "**错误**：未选择文件或文件不存在。", ""
@@ -86,25 +85,16 @@ def handle_upload(file_path: str) -> Tuple[str, str]:
     if not data:
         return "**错误**：文件内容为空。", ""
 
-    os.makedirs(ARCHIVE_DIR, exist_ok=True)
-    base = os.path.basename(file_path) or "upload.pdf"
-    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    short = hashlib.sha256(data).hexdigest()[:8]
-    saved_path = os.path.join(ARCHIVE_DIR, f"{stamp}_{short}_{base}")
-    with open(saved_path, "wb") as out:
-        out.write(data)
-
     engine, text = extract_pdf_text_from_bytes(data)
     meta = (
-        f"**文件**：{base}  \n"
-        f"**保存路径**：`{saved_path}`  \n"
+        f"**文件**：{os.path.basename(file_path)}  \n"
         f"**大小**：{len(data)} bytes  \n"
         f"**解析引擎**：{engine}"
     )
     return meta, text
 
 with gr.Blocks(title="PDF 原始内容提取（Gradio 单文件）") as demo:
-    gr.Markdown("上传 PDF → 点击提交 → 同页显示**未清洗的原始文本**。文件将保存到 `./archived/`。")
+    gr.Markdown("上传 PDF → 点击提交 → 同页显示**未清洗的原始文本**。")
     with gr.Row():
         inp = gr.File(label="选择 PDF 文件", file_types=[".pdf"], type="filepath")
     btn = gr.Button("提交 / Submit")
@@ -114,5 +104,4 @@ with gr.Blocks(title="PDF 原始内容提取（Gradio 单文件）") as demo:
     btn.click(handle_upload, inputs=inp, outputs=[meta, out])
 
 if __name__ == "__main__":
-    # Gradio Space 不需要手动指定端口/host，保持缺省即可
     demo.launch()
