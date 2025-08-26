@@ -1,3 +1,5 @@
+Please summary the photometric numerical performance in paragragh format, in English
+
 按以下參考格式提取內容並輸出成以下markdown format
 
 # 远方 (EVERFINE) HAAS-1200 光色电测试报告

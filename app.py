@@ -6,7 +6,7 @@ Python 3.10；优先 PyMuPDF，回退 pypdf
 """
 
 from __future__ import annotations
-import os, io, hashlib, datetime
+import os, io
 from typing import Dict, Tuple
 from dotenv import load_dotenv
 import openai  # Import OpenAI to use API for querying
@@ -89,61 +89,37 @@ def query_openai_with_prompt(text: str) -> str:
     """
     用 Prompt_md.txt 模板 + 抽取出的原文，透過 ChatOpenAI 產出結果。
     - 若模板已含 {context}/{question} 佔位符，直接用。
-    - 若模板不含佔位符，則把原始文本拼接到模板後再發送。
+    - 若模板不含佔位符，則把原始文本與任務說明自動補齊。
     """
     try:
-        prompt_path = Path(__file__).parent / "Prompt_md.txt"
-        if prompt_path.exists():
-            template_str = prompt_path.read_text("utf-8")
-        else:
-            template_str = "Context:\n{context}\n\nQuestion:\n{question}"
+        template_path = Path(__file__).parent / "Prompt_md.txt"
+        template_str = template_path.read_text("utf-8")
 
-        # 判斷模板是否已有佔位符
-        has_context = "{context}" in template_str
-        has_question = "{question}" in template_str
-
-        # 若模板沒有 {context}，自動把原文附在模板後
-        if not has_context:
-            # 保持模板內容原樣，僅在末尾附上“原始文本”區塊
-            template_str = (
-                f"{template_str}\n\n"
-                "----------------\n"
+        # 1) 若缺少佔位符，補齊段落
+        if "{context}" not in template_str:
+            template_str += (
+                "\n\n----------------\n"
                 "【原始文本 / Context】\n"
                 "{context}\n"
             )
-            has_context = True
-
-        # 若模板沒有 {question}，補上一句通用任務說明
-        if not has_question:
-            template_str = (
-                f"{template_str}\n\n"
-                "【任務 / Instruction】\n"
+        if "{question}" not in template_str:
+            template_str += (
+                "\n\n【任務 / Instruction】\n"
                 "{question}\n"
             )
-            has_question = True
 
-        # 構建 PromptTemplate（只放實際存在的變數）
-        input_vars = []
-        if has_context:
-            input_vars.append("context")
-        if has_question:
-            input_vars.append("question")
+        # 2) 以「最終模板」為準，統一決定需要哪些變數
+        required_vars = [v for v in ("context", "question") if f"{{{v}}}" in template_str]
 
-        prompt = PromptTemplate(
-            input_variables=input_vars,
-            template=template_str
-        )
+        prompt = PromptTemplate(input_variables=required_vars, template=template_str)
+        chain = LLMChain(llm=ChatOpenAI(model_name="gpt-4.1-mini", temperature=0.0), prompt=prompt)
 
-        # 構建 LLMChain（使用新版 ChatOpenAI）
-        llm = ChatOpenAI(model_name="gpt-4.1-mini", temperature=0.0)
-        chain = LLMChain(llm=llm, prompt=prompt)
-
-        # 準備 payload（僅提供存在的鍵）
-        payload = {}
-        if has_context:
-            payload["context"] = text
-        if has_question:
-            payload["question"] = "請根據以上 Context，嚴格依照模板格式完整輸出結果。"
+        # 3) 只填充模板真正需要的鍵
+        full_payload = {
+            "context": text,
+            "question": "請根據以上 Context，嚴格依照模板格式完整輸出結果。"
+        }
+        payload = {k: full_payload[k] for k in required_vars}
 
         result = chain.invoke(payload)
         return (result.get("text") if isinstance(result, dict) else str(result)).strip()
@@ -190,7 +166,8 @@ with gr.Blocks(title="PDF 原始内容提取（Gradio 单文件）") as demo:
     
     meta = gr.Markdown()
     openai_response_box = gr.Textbox(label="AI 摘要", lines=10, show_copy_button=True)
-    original_text_box = gr.Textbox(label="提取结果（原始文本）", lines=10, show_copy_button=True)
+    original_text_box   = gr.Textbox(label="提取结果（原始文本）", lines=10, show_copy_button=True)
+
 
     btn.click(handle_upload, inputs=inp, outputs=[meta, original_text_box, openai_response_box])
 
