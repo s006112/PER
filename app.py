@@ -72,7 +72,7 @@ def handle_upload(file_path: str):
     prompt_summary_str = (base_dir / "Prompt_summary.txt").read_text("utf-8")
 
     openai_md_response = query_openai_with_prompt(prompt_md_str, text)
-    openai_summary_response = query_openai_with_prompt(prompt_summary_str, text)
+    openai_summary_response = query_openai_with_prompt(prompt_summary_str, openai_md_response)
 
     # 合并：一个 textarea 展示
     combined_summary = (
