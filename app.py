@@ -6,7 +6,7 @@ Python 3.10；优先 PyMuPDF，回退 pypdf
 """
 
 from __future__ import annotations
-import os, io
+import os
 from typing import Tuple
 from dotenv import load_dotenv
 import openai  # keep for compatibility; uses OPENAI_API_KEY env var
@@ -14,7 +14,6 @@ from langchain.chat_models import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 from pathlib import Path
-
 import gradio as gr
 
 # 加载环境变量
@@ -23,8 +22,7 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 
 def extract_pdf_text_from_bytes(data: bytes) -> Tuple[str, str]:
     """
-    尝试使用 PyMuPDF (fitz) 解析；若失败，则回退 pypdf
-    返回: (引擎, 提取的文本)
+    使用 PyMuPDF (fitz) 解析；
     """
     try:
         import fitz
@@ -34,29 +32,19 @@ def extract_pdf_text_from_bytes(data: bytes) -> Tuple[str, str]:
     except Exception:
         pass
 
-    try:
-        from PyPDF2 import PdfReader
-        reader = PdfReader(io.BytesIO(data))
-        text = "\n".join([page.extract_text() or "" for page in reader.pages])
-        return "pypdf", text
-    except Exception as e:
-        return "error", f"PDF parsing failed: {e}"
-
 # ----------------------------
-# Minimal helper to remove duplication
+# Generalized single entrypoint
 # ----------------------------
-def _render_with_template(template_filename: str, context_text: str) -> str:
+def query_openai_with_prompt(prompt_content: str, text: str) -> str:
     """
-    Read template file, ensure {context} exists,
-    DO NOT auto-append {question}; build payload only for variables actually present.
-    If {question} exists in the file, pass an empty string as a neutral placeholder
-    (so all task/instruction lives in the prompt file as intended).
+    以“prompt 内容字符串 + 上下文文本”作为输入，调用 LLM。
+    - 不再自动插入 {question}；如果模板里包含 {question}，传入空串占位。
+    - 保持 {context} 兜底：若模板缺少 {context}，自动追加一段以确保上下文被注入。
     """
     try:
-        template_path = Path(__file__).parent / template_filename
-        template_str = template_path.read_text("utf-8")
+        template_str = prompt_content
 
-        # keep a safe {context} fallback so input always flows into the prompt
+        # 保留 {context} 的安全兜底
         if "{context}" not in template_str:
             template_str += (
                 "\n\n----------------\n"
@@ -64,35 +52,21 @@ def _render_with_template(template_filename: str, context_text: str) -> str:
                 "{context}\n"
             )
 
-        # NOTE: do NOT auto-append {question}; the file is the single source of truth
-
+        # 不自动添加 {question}；模板为唯一真实信息来源
         required_vars = [v for v in ("context", "question") if f"{{{v}}}" in template_str]
         prompt = PromptTemplate(input_variables=required_vars, template=template_str)
         chain = LLMChain(llm=ChatOpenAI(model_name="gpt-4.1-mini", temperature=0.0), prompt=prompt)
 
         payload = {}
         if "context" in required_vars:
-            payload["context"] = context_text
+            payload["context"] = text
         if "question" in required_vars:
-            # neutral placeholder; you can wire a UI arg here later if needed
-            payload["question"] = ""
+            payload["question"] = ""  # 中性占位；如需动态任务可在外层传入
 
         result = chain.invoke(payload)
         return (result.get("text") if isinstance(result, dict) else str(result)).strip()
     except Exception as e:
         return f"Error querying OpenAI: {e}"
-
-def query_openai_with_prompt(text: str) -> str:
-    """
-    使用 Prompt_md.txt
-    """
-    return _render_with_template("Prompt_md.txt", text)
-
-def query_openai_with_prompt_summary(text: str) -> str:
-    """
-    使用 Prompt_summary.txt
-    """
-    return _render_with_template("Prompt_summary.txt", text)
 
 def handle_upload(file_path: str) -> Tuple[str, str, str]:
     """
@@ -107,9 +81,13 @@ def handle_upload(file_path: str) -> Tuple[str, str, str]:
 
     engine, text = extract_pdf_text_from_bytes(data)
 
-    # OpenAI 两种摘要
-    openai_md_response = query_openai_with_prompt(text)
-    openai_summary_response = query_openai_with_prompt_summary(text)
+    # 读取两个 prompt 文件的“内容字符串”，并用通用函数调用
+    base_dir = Path(__file__).parent
+    prompt_md_str = (base_dir / "Prompt_md.txt").read_text("utf-8")
+    prompt_summary_str = (base_dir / "Prompt_summary.txt").read_text("utf-8")
+
+    openai_md_response = query_openai_with_prompt(prompt_md_str, text)
+    openai_summary_response = query_openai_with_prompt(prompt_summary_str, text)
 
     # 合并：一个 textarea 展示
     combined_summary = (
@@ -119,7 +97,7 @@ def handle_upload(file_path: str) -> Tuple[str, str, str]:
         f"{openai_md_response}"
     )
 
-    # Fix: return a proper meta string (previously returned undefined `meta`)
+    # 返回 meta（修正：返回真实字符串而非未定义变量）
     meta_md = f"**Parser**: {engine} · **Chars**: {len(text)}"
     return meta_md, text, combined_summary
 
