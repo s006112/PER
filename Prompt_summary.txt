@@ -6,4 +6,5 @@ State follow in point form
 • Point out deviations from expected standards, benchmarks, or design specifications
 • Maintain professional, technical tone with focus on clarity and precision
 • Ensure the list is structured so that critical anomalies stand out distinctly from normal performance data
+• markdown symbol --- NOT allowed to use
 
