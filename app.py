@@ -2,23 +2,19 @@
 # -*- coding: utf-8 -*-
 """
 Gradio 单文件：上传 PDF -> 同页显示原始文本 + 合并后的摘要
-Python 3.10；优先 PyMuPDF，回退 pypdf
+Python 3.10；优先 PyMuPDF
 """
 
 from __future__ import annotations
 import os
 from typing import Tuple
 from dotenv import load_dotenv
-import openai  # keep for compatibility; uses OPENAI_API_KEY env var
-from langchain.chat_models import ChatOpenAI
-from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
 from pathlib import Path
 import gradio as gr
 
-# 加载环境变量
+from openai import OpenAI
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def extract_pdf_text_from_bytes(data: bytes) -> Tuple[str, str]:
     """
@@ -37,38 +33,24 @@ def extract_pdf_text_from_bytes(data: bytes) -> Tuple[str, str]:
 # ----------------------------
 def query_openai_with_prompt(prompt_content: str, text: str) -> str:
     """
-    以“prompt 内容字符串 + 上下文文本”作为输入，调用 LLM。
-    - 不再自动插入 {question}；如果模板里包含 {question}，传入空串占位。
-    - 保持 {context} 兜底：若模板缺少 {context}，自动追加一段以确保上下文被注入。
+    不使用 LangChain；直接以“prompt 文字 + context 文本”呼叫 OpenAI。
     """
     try:
-        template_str = prompt_content
+        if "{context}" in prompt_content:
+            final_prompt = prompt_content.replace("{context}", text)
+        else:
+            final_prompt = f"{prompt_content}\n\n{text}"
 
-        # 保留 {context} 的安全兜底
-        if "{context}" not in template_str:
-            template_str += (
-                "\n\n----------------\n"
-                "【Original Content / Context】\n"
-                "{context}\n"
-            )
-
-        # 不自动添加 {question}；模板为唯一真实信息来源
-        required_vars = [v for v in ("context", "question") if f"{{{v}}}" in template_str]
-        prompt = PromptTemplate(input_variables=required_vars, template=template_str)
-        chain = LLMChain(llm=ChatOpenAI(model_name="gpt-4.1-mini", temperature=0.0), prompt=prompt)
-
-        payload = {}
-        if "context" in required_vars:
-            payload["context"] = text
-        if "question" in required_vars:
-            payload["question"] = ""  # 中性占位；如需动态任务可在外层传入
-
-        result = chain.invoke(payload)
-        return (result.get("text") if isinstance(result, dict) else str(result)).strip()
+        resp = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[{"role": "user", "content": final_prompt}],
+            temperature=0.0,
+        )
+        return resp.choices[0].message.content.strip()
     except Exception as e:
         return f"Error querying OpenAI: {e}"
 
-def handle_upload(file_path: str) -> Tuple[str, str, str]:
+def handle_upload(file_path: str):
     """
     Gradio 回调：接收文件路径，读取 bytes，解析并查询 OpenAI
     返回：meta（Markdown）、原始文本、合并后的摘要
@@ -79,7 +61,10 @@ def handle_upload(file_path: str) -> Tuple[str, str, str]:
     with open(file_path, "rb") as f:
         data = f.read()
 
-    engine, text = extract_pdf_text_from_bytes(data)
+    result = extract_pdf_text_from_bytes(data)
+    if not result:
+        return "Error: PDF parsing failed.", "", ""
+    engine, text = result
 
     # 读取两个 prompt 文件的“内容字符串”，并用通用函数调用
     base_dir = Path(__file__).parent
@@ -97,7 +82,6 @@ def handle_upload(file_path: str) -> Tuple[str, str, str]:
         f"{openai_md_response}"
     )
 
-    # 返回 meta（修正：返回真实字符串而非未定义变量）
     meta_md = f"**Parser**: {engine} · **Chars**: {len(text)}"
     return meta_md, text, combined_summary
 

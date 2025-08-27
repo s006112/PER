@@ -1,8 +1,8 @@
 
-・從提供的PDF content中逐行提取內容
-・嚴格按照以下結構與提取內容更新數據
-・以Markdown格式輸出
-・所有參數與文本必須完全引用自PDF content，不得自行補充或修改
+* Extract the content from the provided PDF **line by line**
+* Strictly update the data according to the following **structure and extracted content**
+* Output in the following **format**
+* All parameters and text must be **directly quoted from the PDF content**, without any additions or modifications
 
 ---
 
