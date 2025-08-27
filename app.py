@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*- 
 """
-Gradio 单文件：上传 PDF -> 同页显示原始文本
+Gradio 单文件：上传 PDF -> 同页显示原始文本 + 合并后的摘要
 Python 3.10；优先 PyMuPDF，回退 pypdf
 """
 
@@ -112,43 +112,45 @@ def query_openai_with_prompt_summary(text: str) -> str:
     except Exception as e:
         return f"Error querying OpenAI (summary): {e}"
 
-def handle_upload(file_path: str) -> Tuple[str, str, str, str]:
+def handle_upload(file_path: str) -> Tuple[str, str, str]:
     """
     Gradio 回调：接收文件路径，读取 bytes，解析并查询 OpenAI
+    返回：meta（Markdown）、原始文本、合并后的摘要
     """
     if not file_path or not os.path.isfile(file_path):
-        return "Error: No file found.", "", "", ""
+        return "Error: No file found.", "", ""
 
     with open(file_path, "rb") as f:
         data = f.read()
 
     engine, text = extract_pdf_text_from_bytes(data)
-    
+
+    # OpenAI 两种摘要
     openai_md_response = query_openai_with_prompt(text)
     openai_summary_response = query_openai_with_prompt_summary(text)
-    
-#    meta = (
-#        f"**文件**：{os.path.basename(file_path)}  \n"
-#        f"**大小**：{len(data)} bytes  \n"
-#        f"**解析引擎**：{engine}"
-#    )
-    
-    return meta, text, openai_md_response, openai_summary_response
 
-with gr.Blocks(title="PDF 原始内容提取（Gradio 单文件）") as demo:
-#    gr.Markdown("上传 PDF → 点击提交 → 同页显示**未清洗的原始文本**，并显示 OpenAI 的摘要。")
-    
+    # 合并：一个 textarea 展示
+    combined_summary = (
+        "## Overall summary\n"
+        f"{openai_summary_response}\n\n"
+        "---\n"
+        f"{openai_md_response}"
+    )
+
+    return meta, text, combined_summary
+
+with gr.Blocks(title="Photometric extraction") as demo:
     with gr.Row():
-        inp = gr.File(label="选择 PDF 文件", file_types=[".pdf"], type="filepath")
-    
+        inp = gr.File(label="Upload PDF File", file_types=[".pdf"], type="filepath")
+
     btn = gr.Button("提交 / Submit")
-    
+
     meta = gr.Markdown()
-    summary_points_box  = gr.Textbox(label="Photometric summary", lines=10, show_copy_button=True)
-    markdown_summary_box = gr.Textbox(label="Markdown summary", lines=10, show_copy_button=True)
+    combined_summary_box = gr.Textbox(label="Summary", lines=14, show_copy_button=True)
     original_text_box   = gr.Textbox(label="Sphere PDF extraction", lines=10, show_copy_button=True)
 
-    btn.click(handle_upload, inputs=inp, outputs=[meta, original_text_box, markdown_summary_box, summary_points_box])
+    # 注意输出顺序与 handle_upload 的返回顺序匹配
+    btn.click(handle_upload, inputs=inp, outputs=[meta, original_text_box, combined_summary_box])
 
 if __name__ == "__main__":
     demo.launch()

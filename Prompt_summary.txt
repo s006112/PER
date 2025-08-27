@@ -1,3 +1,4 @@
+• Identify the product category in the field "产品型号" or "客户样品编号"
 • Firstly Summarize in detail the photometric numerical performance clearly in concise English paragraph form
 State follow in point form
 • Highlight only outstanding performance metrics
