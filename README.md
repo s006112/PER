@@ -1,5 +1,5 @@
 ---
-title: PDF 原始内容提取
+title: Photometric Summary
 emoji: 👀
 colorFrom: blue
 colorTo: yellow
