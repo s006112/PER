@@ -2,8 +2,8 @@
 * Extract the content from the provided PDF **line by line**
 * All parameters and text must be **directly quoted from the PDF content**, without any additions or modifications
 * Merge in table format if multiple data set found
-* If miss the CRI  (Color rendering index) value in raw content, calculate the CRI value by arithmetic mean of R1–R14 per particular samples, to the nearest one decimal place. 
 * Output exactly in the following **format**
+* calculate the CRI (Color rendering index) value by arithmetic mean of R1–R14 per particular samples, to the nearest one decimal place. Then fill in the location of $$$  
 * No need to present any manipulation about CRI
 * Strictly update the data according to the following **structure and extracted content**
 
@@ -38,9 +38,9 @@
 
 | 指数  | CRI (Cal.) | Ra  | R1  | R2  | R3  | R4  | R5  | R6  | R7  | R8  | R9  | R10 | R11 | R12 | R13 | R14 | R15 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 数值 1 | 82 | 81  | 89  | 95  | 81  | 81  | 85  | 86  | 63  | 63  | 4   | 75  | 81  | 60  | 83  | 98  | 74  |
-| 数值 2 | 82 | 81  | 89  | 95  | 81  | 81  | 85  | 86  | 63  | 63  | 4   | 75  | 81  | 60  | 83  | 98  | 74  |
-| 数值 3 | 82 | 81  | 89  | 95  | 81  | 81  | 85  | 86  | 63  | 63  | 4   | 75  | 81  | 60  | 83  | 98  | 74  |
+| 数值 1 | $$$ | 81  | 89  | 95  | 81  | 81  | 85  | 86  | 63  | 63  | 4   | 75  | 81  | 60  | 83  | 98  | 74  |
+| 数值 2 | $$$ | 81  | 89  | 95  | 81  | 81  | 85  | 86  | 63  | 63  | 4   | 75  | 81  | 60  | 83  | 98  | 74  |
+| 数值 3 | $$$ | 81  | 89  | 95  | 81  | 81  | 85  | 86  | 63  | 63  | 4   | 75  | 81  | 60  | 83  | 98  | 74  |
 
 ### 电参数
 

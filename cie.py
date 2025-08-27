@@ -20,7 +20,7 @@ JS_DRAW = r"""
   const W = c.width, H = c.height;
 
   // Plot window and padding
-  const xmin=0.28, xmax=0.50, ymin=0.30, ymax=0.44, pad=60;
+  const xmin=0.28, xmax=0.54, ymin=0.28, ymax=0.46, pad=60;
   const sx = x => pad + (x - xmin) * (W - 2*pad) / (xmax - xmin);
   const sy = y => H - pad - (y - ymin) * (H - 2*pad) / (ymax - ymin);
   const hexToRgba = (hex,a)=>{
@@ -31,6 +31,8 @@ JS_DRAW = r"""
 
   // ANSI C78.377-2015 bins (centers + quadrangle corners)
   const bins=[
+    {cct:2200, center:[0.5018,0.4153], corners:[[0.5259,0.4342],[0.5045,0.4344],[0.4799,0.3967],[0.4993,0.3967]]},
+    {cct:2500, center:[0.4806,0.4141], corners:[[0.5045,0.4344],[0.4813,0.4319],[0.4593,0.3944],[0.4797,0.3967]]},
     {cct:2700, center:[0.4578,0.4101], corners:[[0.4813,0.4319],[0.4562,0.4260],[0.4373,0.3893],[0.4593,0.3944]]},
     {cct:3000, center:[0.4339,0.4033], corners:[[0.4562,0.4260],[0.4303,0.4173],[0.4150,0.3821],[0.4373,0.3893]]},
     {cct:3500, center:[0.4078,0.3930], corners:[[0.4303,0.4173],[0.4003,0.4035],[0.3895,0.3709],[0.4150,0.3821]]},
