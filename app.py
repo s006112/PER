@@ -61,144 +61,43 @@ def query_openai_with_prompt(prompt_content: str, text: str) -> str:
 # Upload handler
 # ----------------------------
 
+def test_with_known_data():
+    """Test function with known 3-point data to isolate the issue"""
+    test_data = [
+        ["POINT_A", 0.35, 0.35],
+        ["POINT_B", 0.40, 0.40],
+        ["POINT_C", 0.45, 0.42]
+    ]
+
+    test_summary = f"""## DEBUG: Test Data with {len(test_data)} Points
+
+Testing with exactly 3 coordinate points (simplified):
+- POINT_A: (0.35, 0.35) - Bottom left
+- POINT_B: (0.40, 0.40) - Middle
+- POINT_C: (0.45, 0.42) - Top right
+
+All coordinates are within plotting range (x: 0.28-0.50, y: 0.30-0.44).
+If only 1 point shows, the issue is in JavaScript extraction/rendering.
+
+**Check the dataframe below - it should show 3 rows of data.**
+"""
+
+    print(f"PYTHON DEBUG: Returning {len(test_data)} points to Gradio")
+    for i, point in enumerate(test_data):
+        print(f"PYTHON DEBUG: Point {i}: {point}")
+
+    return test_summary, test_data, "Test content"
+
 def handle_upload(file_path: str):
     """
     Gradio callback: read file path, parse PDF, call OpenAI with two prompts
     Returns: combined_summary (str), cct_xy (list[list])  # [[参数, x, y], ...]
     """
-    import os
-    import re
-    from pathlib import Path
+    # TEMPORARY: Use test data to isolate the issue
+    return test_with_known_data()
 
-    if not file_path or not os.path.isfile(file_path):
-        return "Error: No file found.", []
 
-    with open(file_path, "rb") as f:
-        data = f.read()
 
-    engine, text = extract_pdf_text_from_bytes(data)
-    if not text:
-        return "Error: PDF parsing failed.", []
-
-    base_dir = Path(__file__).parent
-    try:
-        prompt_md_str = (base_dir / "Prompt_md.txt").read_text("utf-8")
-    except Exception as e:
-        return f"Error reading Prompt_md.txt: {e}", []
-    try:
-        prompt_summary_str = (base_dir / "Prompt_summary.txt").read_text("utf-8")
-    except Exception as e:
-        return f"Error reading Prompt_summary.txt: {e}", []
-
-    openai_md_response = query_openai_with_prompt(prompt_md_str, text)
-    openai_summary_response = query_openai_with_prompt(prompt_summary_str, openai_md_response)
-
-    combined_summary = (
-        "## Overall summary\n"
-        f"{openai_summary_response}\n\n"
-        "---\n"
-        f"{openai_md_response}"
-    )
-
-    # --- Parse "### 光谱参数" table for 色坐标 (x, y) into cct_xy matrix
-    # Requirements:
-    # - cct_xy item count reflects the number of data rows (single or multiple).
-    # - 参数 content is column 1 of the table (1-based), i.e., the first column (index 0).
-    # - Count row cell numbers first and only build entries from rows with enough cells.
-    def _extract_cct_xy(md: str):
-        try:
-            lines = md.splitlines()
-
-            # Locate the "### 光谱参数" section
-            start = None
-            for i, ln in enumerate(lines):
-                s = ln.strip()
-                if s.startswith("###") and "光谱参数" in s:
-                    start = i
-                    break
-            if start is None:
-                return []
-
-            # End at next "### " or EOF
-            end = len(lines)
-            for j in range(start + 1, len(lines)):
-                ss = lines[j].strip()
-                if ss.startswith("### "):
-                    end = j
-                    break
-            section = lines[start:end]
-
-            # Collect markdown table lines
-            table_lines = [ln for ln in section if "|" in ln]
-            if not table_lines:
-                return []
-
-            rows = []
-            for ln in table_lines:
-                s = ln.strip()
-                cells = [c.strip() for c in s.strip("|").split("|")]
-                # Skip separator rows like | --- | --- |
-                if all(re.fullmatch(r"-{3,}", c or "") for c in cells):
-                    continue
-                rows.append(cells)
-            if not rows:
-                return []
-
-            # Find header row (contains column names including 色坐标 and likely 参数)
-            header_idx = None
-            for idx, r in enumerate(rows):
-                if any("色坐标" in c for c in r):
-                    header_idx = idx
-                    break
-            if header_idx is None:
-                return []
-
-            header = rows[header_idx]
-
-            # Determine indices with robustness
-            try:
-                xy_col = next(i for i, c in enumerate(header) if "色坐标" in c)
-            except StopIteration:
-                return []
-
-            # 参数 is specified as column 1 (1-based) => index 0; but if a header named 参数 exists elsewhere, prefer that.
-            param_col = 0
-            for i, c in enumerate(header):
-                if "参数" in c:
-                    param_col = i
-                    break
-
-            # Count row cell numbers first; only keep rows with enough cells
-            required_cols = max(param_col, xy_col) + 1
-            data_rows = [r for r in rows[header_idx + 1:] if len(r) >= required_cols]
-            # At this point, cct_xy length should match valid data_rows length (may be 0, 1, or many)
-            if not data_rows:
-                return []
-
-            out = []
-            for r in data_rows:
-                xy_text = r[xy_col]
-                # tolerant match: "0.3191, 0.2190" with optional spaces
-                m = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*,\s*([0-9]+(?:\.[0-9]+)?)", xy_text)
-                if not m:
-                    continue
-                try:
-                    x = float(m.group(1))
-                    y = float(m.group(2))
-                except Exception:
-                    continue
-
-                # 参数 content as column 1
-                param = r[param_col] if len(r) > param_col and r[param_col] else f"行{len(out)+1}"
-                out.append([param, x, y])
-
-            return out
-        except Exception:
-            return []
-
-    cct_xy = _extract_cct_xy(openai_md_response)
-
-    return combined_summary, cct_xy, text
 
 
 # ----------------------------
@@ -219,6 +118,22 @@ CANVAS_HTML = """
 # - Use a Shadow-DOM–aware root: query inside <gradio-app>.shadowRoot when present.
 JS_DRAW = r"""
 () => {
+  console.log("🚀 JAVASCRIPT STARTED - CIE Chart JS is executing!");
+
+  // IMMEDIATE VISUAL TEST - Draw something on any canvas found
+  const testCanvas = document.querySelector('canvas');
+  if (testCanvas) {
+    console.log("✓ Found canvas for immediate test");
+    const testCtx = testCanvas.getContext('2d');
+    testCtx.fillStyle = '#00ff00';
+    testCtx.fillRect(5, 5, 200, 30);
+    testCtx.fillStyle = '#000';
+    testCtx.font = '14px Arial';
+    testCtx.fillText('JS EXECUTING!', 10, 25);
+  } else {
+    console.log("✗ No canvas found for immediate test");
+  }
+
   const MAX_RETRIES = 200;
   let prevSig = ""; // avoid redundant redraws
 
@@ -235,22 +150,17 @@ JS_DRAW = r"""
 
   // NEW: extract [[param, x, y], ...] from the cct_xy Dataframe table
   function extractPoints(root){
-    const host = root.getElementById("cct_xy_df");
-    if(!host) return [];
-    const table = host.querySelector("table");
-    if(!table) return [];
-    const rows = Array.from(table.querySelectorAll("tbody tr"));
-    const pts = [];
-    for (const tr of rows){
-      const tds = tr.querySelectorAll("td");
-      if (tds.length >= 3){
-        const param = (tds[0].textContent || "").trim();
-        const x = parseFloat((tds[1].textContent || "").replace(/[^\d\.\-]/g,""));
-        const y = parseFloat((tds[2].textContent || "").replace(/[^\d\.\-]/g,""));
-        if (Number.isFinite(x) && Number.isFinite(y)) pts.push([param, x, y]);
-      }
-    }
-    return pts;
+    console.log("=== EXTRACT POINTS SIMPLE VERSION ===");
+
+    // SIMPLE TEST: Return hardcoded test data to verify rendering works
+    console.log("Returning hardcoded test data for debugging");
+    const testPoints = [
+      ["POINT_A", 0.35, 0.35],
+      ["POINT_B", 0.40, 0.40],
+      ["POINT_C", 0.45, 0.42]
+    ];
+    console.log("Test points:", testPoints);
+    return testPoints;
   }
 
   function draw(canvas, points){
@@ -290,7 +200,7 @@ JS_DRAW = r"""
       for(let x=Math.ceil(xmin/step)*step; x<=xmax+1e-9; x+=step){
         const X=sx(x);
         ctx.strokeStyle='#e6e6e6'; ctx.beginPath(); ctx.moveTo(X, sy(ymin)); ctx.lineTo(X, sy(ymax)); ctx.stroke();
-        ctx.strokeStyle='#999'; ctx.beginPath(); ctx.moveTo(X, sy(ymin)); ctx.lineTo(X, sy[ymin]-4); ctx.stroke(); // keep original behavior
+        ctx.strokeStyle='#999'; ctx.beginPath(); ctx.moveTo(X, sy(ymin)); ctx.lineTo(X, sy(ymin)-4); ctx.stroke();
         ctx.fillStyle='#000'; ctx.fillText(x.toFixed(2), X-12, sy(ymin)+16);
       }
       for(let y=Math.ceil(ymin/step)*step; y<=ymax+1e-9; y+=step){
@@ -355,13 +265,43 @@ JS_DRAW = r"""
 
     // NEW: draw points as cross symbols "╳"
     function drawPoints(points){
-      if (!Array.isArray(points) || !points.length) return;
-      const size = 4;
+      console.log("=== DRAW POINTS DEBUG START ===");
+      console.log("drawPoints called with:", points);
+
+      if (!Array.isArray(points)) {
+        console.log("ERROR: points is not an array:", typeof points);
+        return;
+      }
+
+      if (!points.length) {
+        console.log("ERROR: points array is empty");
+        return;
+      }
+
+      console.log(`✓ Drawing ${points.length} points`);
+
+      const size = 6;
       ctx.strokeStyle = '#000';
-      ctx.lineWidth = 1;
-      for (const p of points){
-        const X = sx(p[1]), Y = sy(p[2]);
-        if (!isFinite(X) || !isFinite(Y)) continue;
+      ctx.lineWidth = 2;
+
+      for (let i = 0; i < points.length; i++){
+        const p = points[i];
+        console.log(`Point ${i}:`, p);
+
+        const x_coord = p[1];
+        const y_coord = p[2];
+        console.log(`Point ${i} coordinates: x=${x_coord}, y=${y_coord}`);
+
+        const X = sx(x_coord);
+        const Y = sy(y_coord);
+        console.log(`Point ${i} screen coords: X=${X}, Y=${Y}`);
+
+        if (!isFinite(X) || !isFinite(Y)) {
+          console.log(`✗ Point ${i} skipped - non-finite screen coordinates`);
+          continue;
+        }
+
+        console.log(`✓ Drawing point ${i} at screen (${X}, ${Y})`);
         ctx.beginPath();
         ctx.moveTo(X - size, Y - size);
         ctx.lineTo(X + size, Y + size);
@@ -369,24 +309,125 @@ JS_DRAW = r"""
         ctx.lineTo(X + size, Y - size);
         ctx.stroke();
       }
+
+      console.log("=== DRAW POINTS DEBUG END ===");
     }
 
+    console.log("=== DRAW FUNCTION DEBUG ===");
+    console.log("draw() called with points:", points);
+
+    // IMMEDIATE VISUAL TEST - Green indicator that draw() is called
+    ctx.fillStyle = '#00ff00';
+    ctx.fillRect(canvas.width - 150, 5, 140, 25);
+    ctx.fillStyle = '#000';
+    ctx.font = '12px Arial';
+    ctx.fillText('DRAW() CALLED!', canvas.width - 145, 20);
+
     drawAxes(); drawPlanck(); drawBins();
-    if (Array.isArray(points)) drawPoints(points); // <- overlay
+
+    // Add comprehensive debug info to canvas
+    ctx.fillStyle = '#ff0000';
+    ctx.font = '10px Arial';
+    let debugY = 15;
+
+    if (Array.isArray(points)) {
+      console.log("✓ Points is array, calling drawPoints");
+      ctx.fillText(`DEBUG: ${points.length} points received`, 10, debugY);
+      debugY += 12;
+
+      // Show detailed coordinate info
+      for (let i = 0; i < Math.min(points.length, 5); i++) {
+        const p = points[i];
+        ctx.fillText(`${i}: [${p[0]}, ${p[1]}, ${p[2]}]`, 10, debugY);
+        debugY += 12;
+
+        // Check for duplicate coordinates
+        if (i > 0) {
+          const prev = points[i-1];
+          if (p[1] === prev[1] && p[2] === prev[2]) {
+            ctx.fillStyle = '#ff0000';
+            ctx.fillText(`⚠️ DUPLICATE COORDS!`, 200, debugY - 12);
+            ctx.fillStyle = '#ff0000';
+          }
+        }
+      }
+
+      // Show unique coordinate count
+      const uniqueCoords = new Set(points.map(p => `${p[1]},${p[2]}`));
+      ctx.fillText(`Unique coords: ${uniqueCoords.size}/${points.length}`, 10, debugY);
+      debugY += 12;
+
+      if (uniqueCoords.size < points.length) {
+        ctx.fillStyle = '#ff0000';
+        ctx.fillText(`ERROR: Coordinate extraction failed!`, 10, debugY);
+        ctx.fillStyle = '#ff0000';
+      }
+
+      drawPoints(points); // <- overlay
+    } else {
+      console.log("✗ Points is not array:", typeof points, points);
+      ctx.fillText(`DEBUG: Points not array: ${typeof points}`, 10, debugY);
+    }
+
+    console.log("=== DRAW FUNCTION END ===");
   }
 
   // NEW: observe dataframe changes and redraw when cct_xy updates
   function observeDataframe(root, canvas){
     const host = root.getElementById("cct_xy_df");
     if (!host) return;
+
+    let retryCount = 0;
+    const maxRetries = 10;
+
     const update = () => {
-      const pts = extractPoints(root);
-      const sig = JSON.stringify(pts);
-      if (sig !== prevSig){
-        prevSig = sig;
-        try { draw(canvas, pts); } catch(e){ console.error("CIE redraw error:", e); }
-      }
+      console.log("=== UPDATE FUNCTION DEBUG ===");
+      console.log("update() called, retry:", retryCount);
+
+      // Progressive delay - more time for later retries
+      const delay = Math.min(100 + (retryCount * 100), 1000);
+
+      setTimeout(() => {
+        const pts = extractPoints(root);
+        console.log("extractPoints returned:", pts);
+
+        const sig = JSON.stringify(pts);
+        console.log("New signature:", sig);
+        console.log("Previous signature:", prevSig);
+
+        // If we got no points and haven't retried much, try again
+        if (pts.length === 0 && retryCount < maxRetries) {
+          retryCount++;
+          console.log(`No points found, scheduling retry ${retryCount}/${maxRetries}`);
+          setTimeout(update, 500);
+          return;
+        }
+
+        // If we got fewer points than expected, also retry
+        if (pts.length === 1 && retryCount < maxRetries) {
+          retryCount++;
+          console.log(`Only 1 point found, scheduling retry ${retryCount}/${maxRetries}`);
+          setTimeout(update, 500);
+          return;
+        }
+
+        if (sig !== prevSig){
+          console.log("✓ Signature changed, redrawing");
+          prevSig = sig;
+          retryCount = 0; // Reset retry count on successful update
+          try {
+            draw(canvas, pts);
+          } catch(e){
+            console.error("CIE redraw error:", e);
+          }
+        } else {
+          console.log("✗ Signature unchanged, skipping redraw");
+        }
+
+        console.log("=== UPDATE FUNCTION END ===");
+      }, delay);
     };
+
     const mo = new MutationObserver(update);
     mo.observe(host, {subtree:true, childList:true, characterData:true});
     update(); // initial
@@ -394,10 +435,23 @@ JS_DRAW = r"""
 
   let tries = 0;
   (function waitAndDraw(){
+    console.log("DEBUG: waitAndDraw() called");
     const root = gradioRoot();
     const canvas = locateCanvas(root);
     if (canvas) {
-      try { draw(canvas, extractPoints(root)); } catch(e){ console.error("CIE draw error:", e); }
+      console.log("Canvas found, setting up initial draw and observer");
+
+      // Initial draw with delay
+      setTimeout(() => {
+        console.log("Performing delayed initial draw");
+        try {
+          const initialPoints = extractPoints(root);
+          draw(canvas, initialPoints);
+        } catch(e){
+          console.error("CIE initial draw error:", e);
+        }
+      }, 500); // 500ms delay for initial draw
+
       observeDataframe(root, canvas);
       return;
     }
@@ -415,9 +469,12 @@ JS_DRAW = r"""
 # ----------------------------
 # UI
 # ----------------------------
+
+
 with gr.Blocks(title="Photometric extraction") as demo:
     with gr.Row():
         inp = gr.File(label="Upload PDF File", file_types=[".pdf"], type="filepath")
+        test_btn = gr.Button("🔬 Test with 3 Points", variant="secondary")
     btn = gr.Button("Submit")
 
 #    meta = gr.Markdown()
@@ -439,9 +496,13 @@ with gr.Blocks(title="Photometric extraction") as demo:
 #    btn.click(handle_upload, inputs=inp, outputs=[meta, original_text_box, combined_summary_box])
 #    btn.click(handle_upload, inputs=inp, outputs=[combined_summary_box])
     btn.click(handle_upload, inputs=inp, outputs=[combined_summary_box, cct_xy_box, original_text_box])
+    test_btn.click(test_with_known_data, inputs=[], outputs=[combined_summary_box, cct_xy_box, original_text_box])
 
     # Run the JS after app loads (works in local and Spaces)
     demo.load(fn=lambda: None, inputs=[], outputs=[], js=JS_DRAW)
+
+    # Auto-load test data on startup for debugging
+    demo.load(fn=test_with_known_data, inputs=[], outputs=[combined_summary_box, cct_xy_box, original_text_box])
 
 if __name__ == "__main__":
     demo.launch()
