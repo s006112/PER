@@ -85,9 +85,7 @@ def handle_upload(file_path: str):
         return f"Error reading Prompt_summary.txt: {e}", "", ""
 
     openai_md_response = query_openai_with_prompt(prompt_md_str, text)
-    openai_summary_response = query_openai_with_prompt(
-        prompt_summary_str, openai_md_response
-    )
+    openai_summary_response = query_openai_with_prompt(prompt_summary_str, openai_md_response)
 
     combined_summary = (
         "## Overall summary\n"
@@ -266,11 +264,11 @@ with gr.Blocks(title="Photometric extraction") as demo:
     # CIE chart placed right BEFORE the original_text_box
     gr.HTML(CANVAS_HTML, elem_id="cie_box")
 
-#    original_text_box = gr.Textbox(label="Sphere PDF extraction", lines=10, show_copy_button=True)
+    original_text_box = gr.Textbox(label="Sphere PDF extraction", lines=10, show_copy_button=True)
 
     # Output order unchanged: meta, original_text_box, combined_summary_box
-#    btn.click(handle_upload, inputs=inp, outputs=[meta, original_text_box, combined_summary_box])
-    btn.click(handle_upload, inputs=inp, outputs=[meta, combined_summary_box])
+    btn.click(handle_upload, inputs=inp, outputs=[meta, original_text_box, combined_summary_box])
+#    btn.click(handle_upload, inputs=inp, outputs=[combined_summary_box])
 
     # Run the JS after app loads (works in local and Spaces)
     demo.load(fn=lambda: None, inputs=[], outputs=[], js=JS_DRAW)
