@@ -8,3 +8,4 @@ State follow in point form
 • Maintain professional, technical tone with focus on clarity and precision
 • Ensure the list is structured so that critical anomalies stand out distinctly from normal performance data
 • Never use three dash markdown horizontal rule  
+• No need further remark or any chain of thought to be mentioned after the summary
