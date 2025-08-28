@@ -8,6 +8,7 @@ Gradio single-file app:
 from __future__ import annotations
 
 import os
+import re
 from typing import Tuple
 from dotenv import load_dotenv
 from pathlib import Path
@@ -59,30 +60,35 @@ def query_openai_with_prompt(prompt_content: str, text: str) -> str:
 # ----------------------------
 # Upload handler
 # ----------------------------
+
 def handle_upload(file_path: str):
     """
     Gradio callback: read file path, parse PDF, call OpenAI with two prompts
-    Returns: meta (Markdown), original text, combined summary
+    Returns: combined_summary (str), cct_xy (list[list])  # [[参数, x, y], ...]
     """
+    import os
+    import re
+    from pathlib import Path
+
     if not file_path or not os.path.isfile(file_path):
-        return "Error: No file found.", "", ""
+        return "Error: No file found.", []
 
     with open(file_path, "rb") as f:
         data = f.read()
 
     engine, text = extract_pdf_text_from_bytes(data)
     if not text:
-        return "Error: PDF parsing failed.", "", ""
+        return "Error: PDF parsing failed.", []
 
     base_dir = Path(__file__).parent
     try:
         prompt_md_str = (base_dir / "Prompt_md.txt").read_text("utf-8")
     except Exception as e:
-        return f"Error reading Prompt_md.txt: {e}", "", ""
+        return f"Error reading Prompt_md.txt: {e}", []
     try:
         prompt_summary_str = (base_dir / "Prompt_summary.txt").read_text("utf-8")
     except Exception as e:
-        return f"Error reading Prompt_summary.txt: {e}", "", ""
+        return f"Error reading Prompt_summary.txt: {e}", []
 
     openai_md_response = query_openai_with_prompt(prompt_md_str, text)
     openai_summary_response = query_openai_with_prompt(prompt_summary_str, openai_md_response)
@@ -94,9 +100,106 @@ def handle_upload(file_path: str):
         f"{openai_md_response}"
     )
 
-    meta_md = f"**Parser**: {engine} · **Chars**: {len(text)}"
-#    return meta_md, text, combined_summary
-    return combined_summary
+    # --- Parse "### 光谱参数" table for 色坐标 (x, y) into cct_xy matrix
+    # Requirements:
+    # - cct_xy item count reflects the number of data rows (single or multiple).
+    # - 参数 content is column 1 of the table (1-based), i.e., the first column (index 0).
+    # - Count row cell numbers first and only build entries from rows with enough cells.
+    def _extract_cct_xy(md: str):
+        try:
+            lines = md.splitlines()
+
+            # Locate the "### 光谱参数" section
+            start = None
+            for i, ln in enumerate(lines):
+                s = ln.strip()
+                if s.startswith("###") and "光谱参数" in s:
+                    start = i
+                    break
+            if start is None:
+                return []
+
+            # End at next "### " or EOF
+            end = len(lines)
+            for j in range(start + 1, len(lines)):
+                ss = lines[j].strip()
+                if ss.startswith("### "):
+                    end = j
+                    break
+            section = lines[start:end]
+
+            # Collect markdown table lines
+            table_lines = [ln for ln in section if "|" in ln]
+            if not table_lines:
+                return []
+
+            rows = []
+            for ln in table_lines:
+                s = ln.strip()
+                cells = [c.strip() for c in s.strip("|").split("|")]
+                # Skip separator rows like | --- | --- |
+                if all(re.fullmatch(r"-{3,}", c or "") for c in cells):
+                    continue
+                rows.append(cells)
+            if not rows:
+                return []
+
+            # Find header row (contains column names including 色坐标 and likely 参数)
+            header_idx = None
+            for idx, r in enumerate(rows):
+                if any("色坐标" in c for c in r):
+                    header_idx = idx
+                    break
+            if header_idx is None:
+                return []
+
+            header = rows[header_idx]
+
+            # Determine indices with robustness
+            try:
+                xy_col = next(i for i, c in enumerate(header) if "色坐标" in c)
+            except StopIteration:
+                return []
+
+            # 参数 is specified as column 1 (1-based) => index 0; but if a header named 参数 exists elsewhere, prefer that.
+            param_col = 0
+            for i, c in enumerate(header):
+                if "参数" in c:
+                    param_col = i
+                    break
+
+            # Count row cell numbers first; only keep rows with enough cells
+            required_cols = max(param_col, xy_col) + 1
+            data_rows = [r for r in rows[header_idx + 1:] if len(r) >= required_cols]
+            # At this point, cct_xy length should match valid data_rows length (may be 0, 1, or many)
+            if not data_rows:
+                return []
+
+            out = []
+            for r in data_rows:
+                xy_text = r[xy_col]
+                # tolerant match: "0.3191, 0.2190" with optional spaces
+                m = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*,\s*([0-9]+(?:\.[0-9]+)?)", xy_text)
+                if not m:
+                    continue
+                try:
+                    x = float(m.group(1))
+                    y = float(m.group(2))
+                except Exception:
+                    continue
+
+                # 参数 content as column 1
+                param = r[param_col] if len(r) > param_col and r[param_col] else f"行{len(out)+1}"
+                out.append([param, x, y])
+
+            return out
+        except Exception:
+            return []
+
+    cct_xy = _extract_cct_xy(openai_md_response)
+
+    return combined_summary, cct_xy, text
+
 
 # ----------------------------
 # CIE 1931 canvas + JS (Shadow-DOM safe; robust for Spaces)
@@ -265,11 +368,18 @@ with gr.Blocks(title="Photometric extraction") as demo:
     # CIE chart placed right BEFORE the original_text_box
     gr.HTML(CANVAS_HTML, elem_id="cie_box")
 
-#    original_text_box = gr.Textbox(label="Sphere PDF extraction", lines=10, show_copy_button=True)
+    original_text_box = gr.Textbox(label="Sphere PDF extraction", lines=10, show_copy_button=True)
 
+    # NEW: show parsed CIE x,y matrix (参数, x, y)
+    cct_xy_box = gr.Dataframe(
+        label="CIE x,y (parsed from 光谱参数)",
+        headers=["参数", "x", "y"],
+        interactive=False,
+    )
     # Output order unchanged: meta, original_text_box, combined_summary_box
 #    btn.click(handle_upload, inputs=inp, outputs=[meta, original_text_box, combined_summary_box])
     btn.click(handle_upload, inputs=inp, outputs=[combined_summary_box])
+    btn.click(handle_upload, inputs=inp, outputs=[combined_summary_box, cct_xy_box, original_text_box])
 
     # Run the JS after app loads (works in local and Spaces)
     demo.load(fn=lambda: None, inputs=[], outputs=[], js=JS_DRAW)
