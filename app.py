@@ -356,9 +356,9 @@ JS_DRAW = r"""
     // NEW: draw points as cross symbols "╳"
     function drawPoints(points){
       if (!Array.isArray(points) || !points.length) return;
-      const size = 6;
+      const size = 4;
       ctx.strokeStyle = '#000';
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 1;
       for (const p of points){
         const X = sx(p[1]), Y = sy(p[2]);
         if (!isFinite(X) || !isFinite(Y)) continue;
