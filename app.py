@@ -95,7 +95,8 @@ def handle_upload(file_path: str):
     )
 
     meta_md = f"**Parser**: {engine} · **Chars**: {len(text)}"
-    return meta_md, text, combined_summary
+#    return meta_md, text, combined_summary
+    return combined_summary
 
 # ----------------------------
 # CIE 1931 canvas + JS (Shadow-DOM safe; robust for Spaces)
@@ -258,17 +259,17 @@ with gr.Blocks(title="Photometric extraction") as demo:
         inp = gr.File(label="Upload PDF File", file_types=[".pdf"], type="filepath")
     btn = gr.Button("Submit")
 
-    meta = gr.Markdown()
+#    meta = gr.Markdown()
     combined_summary_box = gr.Textbox(label="Summary", lines=14, show_copy_button=True)
 
     # CIE chart placed right BEFORE the original_text_box
     gr.HTML(CANVAS_HTML, elem_id="cie_box")
 
-    original_text_box = gr.Textbox(label="Sphere PDF extraction", lines=10, show_copy_button=True)
+#    original_text_box = gr.Textbox(label="Sphere PDF extraction", lines=10, show_copy_button=True)
 
     # Output order unchanged: meta, original_text_box, combined_summary_box
-    btn.click(handle_upload, inputs=inp, outputs=[meta, original_text_box, combined_summary_box])
-#    btn.click(handle_upload, inputs=inp, outputs=[combined_summary_box])
+#    btn.click(handle_upload, inputs=inp, outputs=[meta, original_text_box, combined_summary_box])
+    btn.click(handle_upload, inputs=inp, outputs=[combined_summary_box])
 
     # Run the JS after app loads (works in local and Spaces)
     demo.load(fn=lambda: None, inputs=[], outputs=[], js=JS_DRAW)
