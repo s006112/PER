@@ -220,21 +220,40 @@ CANVAS_HTML = """
 JS_DRAW = r"""
 () => {
   const MAX_RETRIES = 200;
+  let prevSig = ""; // avoid redundant redraws
 
   function gradioRoot() {
     const ga = document.querySelector('gradio-app');
-    // In Gradio 4 / Spaces, real DOM is under shadowRoot
     return ga && ga.shadowRoot ? ga.shadowRoot : document;
   }
 
   function locateCanvas(root) {
     const host = root.getElementById("cie_box");
-    // Prefer canvas inside our container; fallback to global
     const c = host ? host.querySelector("#cie") : root.getElementById("cie");
     return c || null;
   }
 
-  function draw(canvas){
+  // NEW: extract [[param, x, y], ...] from the cct_xy Dataframe table
+  function extractPoints(root){
+    const host = root.getElementById("cct_xy_df");
+    if(!host) return [];
+    const table = host.querySelector("table");
+    if(!table) return [];
+    const rows = Array.from(table.querySelectorAll("tbody tr"));
+    const pts = [];
+    for (const tr of rows){
+      const tds = tr.querySelectorAll("td");
+      if (tds.length >= 3){
+        const param = (tds[0].textContent || "").trim();
+        const x = parseFloat((tds[1].textContent || "").replace(/[^\d\.\-]/g,""));
+        const y = parseFloat((tds[2].textContent || "").replace(/[^\d\.\-]/g,""));
+        if (Number.isFinite(x) && Number.isFinite(y)) pts.push([param, x, y]);
+      }
+    }
+    return pts;
+  }
+
+  function draw(canvas, points){
     const ctx = canvas.getContext("2d");
     const W = canvas.width, H = canvas.height;
 
@@ -271,7 +290,7 @@ JS_DRAW = r"""
       for(let x=Math.ceil(xmin/step)*step; x<=xmax+1e-9; x+=step){
         const X=sx(x);
         ctx.strokeStyle='#e6e6e6'; ctx.beginPath(); ctx.moveTo(X, sy(ymin)); ctx.lineTo(X, sy(ymax)); ctx.stroke();
-        ctx.strokeStyle='#999'; ctx.beginPath(); ctx.moveTo(X, sy(ymin)); ctx.lineTo(X, sy[ymin]-4); ctx.stroke();
+        ctx.strokeStyle='#999'; ctx.beginPath(); ctx.moveTo(X, sy(ymin)); ctx.lineTo(X, sy[ymin]-4); ctx.stroke(); // keep original behavior
         ctx.fillStyle='#000'; ctx.fillText(x.toFixed(2), X-12, sy(ymin)+16);
       }
       for(let y=Math.ceil(ymin/step)*step; y<=ymax+1e-9; y+=step){
@@ -297,7 +316,7 @@ JS_DRAW = r"""
         y = -1.1063814*Math.pow(x,3) - 1.34811020*Math.pow(x,2) + 2.18555832*x - 0.20219683;
       } else if(T>2222 && T<=4000){
         y = -0.9549476*Math.pow(x,3) - 1.37418593*Math.pow(x,2) + 2.09137015*x - 0.16748867;
-      } else { // 4000–25000
+      } else {
         y =  3.0817580*Math.pow(x,3) - 5.87338670*Math.pow(x,2) + 3.75112997*x - 0.37001483;
       }
       return [x,y];
@@ -334,7 +353,43 @@ JS_DRAW = r"""
       }
     }
 
+    // NEW: draw points as cross symbols "╳"
+    function drawPoints(points){
+      if (!Array.isArray(points) || !points.length) return;
+      const size = 6;
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 2;
+      for (const p of points){
+        const X = sx(p[1]), Y = sy(p[2]);
+        if (!isFinite(X) || !isFinite(Y)) continue;
+        ctx.beginPath();
+        ctx.moveTo(X - size, Y - size);
+        ctx.lineTo(X + size, Y + size);
+        ctx.moveTo(X - size, Y + size);
+        ctx.lineTo(X + size, Y - size);
+        ctx.stroke();
+      }
+    }
+
     drawAxes(); drawPlanck(); drawBins();
+    if (Array.isArray(points)) drawPoints(points); // <- overlay
+  }
+
+  // NEW: observe dataframe changes and redraw when cct_xy updates
+  function observeDataframe(root, canvas){
+    const host = root.getElementById("cct_xy_df");
+    if (!host) return;
+    const update = () => {
+      const pts = extractPoints(root);
+      const sig = JSON.stringify(pts);
+      if (sig !== prevSig){
+        prevSig = sig;
+        try { draw(canvas, pts); } catch(e){ console.error("CIE redraw error:", e); }
+      }
+    };
+    const mo = new MutationObserver(update);
+    mo.observe(host, {subtree:true, childList:true, characterData:true});
+    update(); // initial
   }
 
   let tries = 0;
@@ -342,7 +397,8 @@ JS_DRAW = r"""
     const root = gradioRoot();
     const canvas = locateCanvas(root);
     if (canvas) {
-      try { draw(canvas); } catch(e){ console.error("CIE draw error:", e); }
+      try { draw(canvas, extractPoints(root)); } catch(e){ console.error("CIE draw error:", e); }
+      observeDataframe(root, canvas);
       return;
     }
     if (tries++ < MAX_RETRIES) {
@@ -353,6 +409,8 @@ JS_DRAW = r"""
   })();
 }
 """
+
+
 
 # ----------------------------
 # UI
@@ -375,10 +433,11 @@ with gr.Blocks(title="Photometric extraction") as demo:
         label="CIE x,y (parsed from 光谱参数)",
         headers=["参数", "x", "y"],
         interactive=False,
+        elem_id="cct_xy_df",  # <-- add this line
     )
     # Output order unchanged: meta, original_text_box, combined_summary_box
 #    btn.click(handle_upload, inputs=inp, outputs=[meta, original_text_box, combined_summary_box])
-    btn.click(handle_upload, inputs=inp, outputs=[combined_summary_box])
+#    btn.click(handle_upload, inputs=inp, outputs=[combined_summary_box])
     btn.click(handle_upload, inputs=inp, outputs=[combined_summary_box, cct_xy_box, original_text_box])
 
     # Run the JS after app loads (works in local and Spaces)

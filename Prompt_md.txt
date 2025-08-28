@@ -5,8 +5,8 @@
 * Merge in table format if multiple data set found
 * Output exactly in the following **format**, while the total number of datasets depends on the PDF content
 * calculate the CRI (Color rendering index) value by arithmetic mean of R1–R14 per particular samples, to the nearest one decimal place. Then fill in the location of $$$  
-* No need to present any manipulation about CRI
 * Strictly update the data according to the following **structure and extracted content**
+* Excluded any remarks nor any manipulation about CRI
 
 ---
 
