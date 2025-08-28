@@ -1,3 +1,4 @@
+• Clean up all previous record or memory, only focus on the latest following content
 • Identify the product category from the field "产品型号" or "产品编号" for product evaluation afterwards, no need to mention the sources.
 • Firstly Summarize in detail the photometric numerical performance clearly in concise English paragraph form
 State follow in point form
