@@ -2,6 +2,21 @@ Please summary the photometric numerical performance in paragragh format, in Eng
 
 
 
+* Extract the content from the provided PDF **line by line**
+* Determine the number of datasets in the PDF by trying the pattern “第 X 页 共 Y 页,” where the value of Y indicates the total number of datasets.
+For Each data set, handle the following content extraction:
+* Identify the 产品型号 column content: by reading the "Model No." or 产品型号 field, blank if no information found
+* Identify the 产品编号 column content: by reading the "Sample SN." or 产品编号 field, blank if no information found
+* Identify the 备 注 column content: by reading the "Description" or 备 注 field, blank if no information found
+* All parameters and text must be **directly quoted from the PDF content**, without any additions or modifications
+* Merge in table format if multiple data set found
+* Output exactly in the following **format**, while the total number of datasets depends on the PDF content
+* calculate the CRI (Color rendering index) value by arithmetic mean of R1–R14 per particular samples, to the nearest one decimal place. Then fill in the location of $$$  
+* Strictly update the data according to the following **structure and extracted content**
+* Never provide any information except the table data shown below
+
+
+
 • Summarize the photometric numerical performance clearly in concise English point form
 • Identify key performance metrics such as intensity, efficiency, luminous flux, distribution, uniformity, and color characteristics
 • Highlight any abnormal values, outliers, or inconsistencies that may be easily overlooked (e.g., sudden drops, unusually high/low readings, irregular distribution patterns)

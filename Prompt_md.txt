@@ -1,31 +1,36 @@
 
-* Extract the content from the provided PDF **line by line**
-* Determine the number of datasets in the PDF by detecting the pattern “第 X 页 共 Y 页,” where the value of Y indicates the total number of datasets.
-* All parameters and text must be **directly quoted from the PDF content**, without any additions or modifications
-* Merge in table format if multiple data set found
-* Output exactly in the following **format**, while the total number of datasets depends on the PDF content
-* calculate the CRI (Color rendering index) value by arithmetic mean of R1–R14 per particular samples, to the nearest one decimal place. Then fill in the location of $$$  
-* Strictly update the data according to the following **structure and extracted content**
-* Excluded any remarks nor any manipulation about CRI
+Read and parse all text from the provided PDF line by line, process page by page
+Treat each page as one dataset (if multiple datasets exist on one page, separate them according to layout, but ensure no missing dataset count)
+For each dataset, extract the following fields:
+Product Model: read from “Model No.” or “产品型号”; leave blank if not found
+Product Number: read from “Sample SN.” or “产品编号”; leave blank if not found
+Remarks: read from “Description” or “备 注”; leave blank if not found
+Digest the content of Product Model, Product Number and Remarks to figure out a term to generalize a Product category and insert to the placeholder @@@
+All parameters and text must be quoted exactly from the PDF, without additions, modifications, translations, or conversions
+If text is unrecognizable or contains special symbols, keep it exactly as is
+Calculate CRI (Color Rendering Index): compute the arithmetic mean of R1–R14 for each sample, rounded to one decimal place; insert the result into the placeholder “$$$” in the template
+If multiple datasets are found, merge them into a single table, ordered by dataset sequence
+Output only the table in the exact given format, preserving column names, order, punctuation, and structure; fill extracted values into the cells; leave blanks as empty strings
+Do not output anything other than the completed table (no explanations, headings, notes, or code blocks)
+
 
 ---
 
-### 产品型号: LD-CC-45-UV-Q-1200-T-L8
+### Product category: @@@
 
-| 产品编号   |   备 注    |
-| --- | --------- |
-|1 LM281B+ 80 3500K A2UASE2| 面板灯 1 |
-|1 LM281B+ 80 3500K A2UASE1| 面板灯 2 |
-|1 LM281B+ 80 3500K A2UASE1| 面板灯 3 |
+| Product Model   | Product Number    |  Remarks    |
+| --- | --------- |--------- |
+|面板灯 1 | 237V8W | LM281B+ 80 3500K |
+|面板灯 2 | 237V8W | LM281B+ 80 4000K |
+|面板灯 3 | 237V8W | LM281B+ 80 5000K |
 
-### 光度参数
+### 光电参数
 
-| 参数  | 光通量 Φ | 光效        | 辐射通量 Φe |
-| --- | --------- | ----------- | ------- |
-| 数值 1 | 3373 lm   | 158.31 lm/W | 10.15 W |
-| 数值 2 | 3373 lm   | 158.31 lm/W | 10.15 W |
-| 数值 3 | 3373 lm   | 158.31 lm/W | 10.15 W |
-
+| 参数  | 电压 V | 电流 I     | 功率 P    | 功率因数 PF | 光通量 Φ | 光效        | 辐射通量 Φe |
+| --- | ------------ | -------- | ------- | ------- | --------- | ----------- | ------- |
+| 数值 1 | 120.05 V     | 0.1788 A | 21.31 W | 0.9928  | 3373 lm   | 158.31 lm/W | 10.15 W |
+| 数值 2 | 120.05 V     | 0.1788 A | 21.31 W | 0.9928  | 3373 lm   | 158.31 lm/W | 10.15 W |
+| 数值 3 | 120.05 V     | 0.1788 A | 21.31 W | 0.9928  | 3373 lm   | 158.31 lm/W | 10.15 W |
 
 ### 光谱参数
 
@@ -42,11 +47,3 @@
 | 数值 1 | $$$ | 81  | 89  | 95  | 81  | 81  | 85  | 86  | 63  | 63  | 4   | 75  | 81  | 60  | 83  | 98  | 74  |
 | 数值 2 | $$$ | 81  | 89  | 95  | 81  | 81  | 85  | 86  | 63  | 63  | 4   | 75  | 81  | 60  | 83  | 98  | 74  |
 | 数值 3 | $$$ | 81  | 89  | 95  | 81  | 81  | 85  | 86  | 63  | 63  | 4   | 75  | 81  | 60  | 83  | 98  | 74  |
-
-### 电参数
-
-| 参数  | 电压 V | 电流 I     | 功率 P    | 功率因数 PF |
-| --- | ------------ | -------- | ------- | ------- |
-| 数值  1| 120.05 V     | 0.1788 A | 21.31 W | 0.9928  |
-| 数值  2| 120.05 V     | 0.1788 A | 21.31 W | 0.9928  |
-| 数值  3| 120.05 V     | 0.1788 A | 21.31 W | 0.9928  |
