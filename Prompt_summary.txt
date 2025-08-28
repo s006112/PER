@@ -1,11 +1,10 @@
-• Clean up all previous record or memory, only focus on the latest following content
-• Identify the product category from the field "产品型号" or "产品编号" for product evaluation afterwards, no need to mention the sources.
-• Firstly Summarize in detail the photometric numerical performance clearly in concise English paragraph form
-State follow in point form
-• Highlight only outstanding performance metrics
-• Highlight any abnormal values, outliers, or inconsistencies that may be easily overlooked (e.g., sudden drops, unusually high/low readings, irregular distribution patterns)
-• Point out deviations from expected standards, benchmarks, or design specifications
-• Maintain professional, technical tone with focus on clarity and precision
-• Ensure the list is structured so that critical anomalies stand out distinctly from normal performance data
-• Never use three dash markdown horizontal rule  
-• No need further remark or any chain of thought to be mentioned after the summary
+Analyze the product category table and remarks dataset to produce the following outputs:
+• Begin with a concise, professional English paragraph summarizing in detail the photometric numerical performance
+• Follow with a structured point-form list with subtopic ### that includes:
+　- All outstanding performance metrics that clearly demonstrate strong results
+　- Any abnormal values, outliers, or inconsistencies, such as sudden drops, unusually high/low readings, or irregular distribution patterns
+　- Deviations from expected standards, benchmarks, or design specifications
+• Ensure the tone is professional, technical, precise, and focused on clarity
+• Structure the point list so that critical anomalies are highlighted distinctly from normal performance data
+• Do not use three-dash markdown horizontal rules
+• Provide only the requested summary and list without additional remarks or reasoning

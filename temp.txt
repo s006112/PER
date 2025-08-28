@@ -25,6 +25,19 @@ For Each data set, handle the following content extraction:
 • Ensure the list is structured so that critical anomalies stand out distinctly from normal performance data
 
 
+• Digest "the product category table" and the remarks details among datasets
+• Firstly Summarize in detail the photometric numerical performance clearly in concise English paragraph form
+State follow in point form
+• Highlight all outstanding performance metrics
+• Highlight any abnormal values, outliers, or inconsistencies that may be easily overlooked (e.g., sudden drops, unusually high/low readings, irregular distribution patterns)
+• Point out deviations from expected standards, benchmarks, or design specifications
+• Maintain professional, technical tone with focus on clarity and precision
+• Ensure the list is structured so that critical anomalies stand out distinctly from normal performance data
+• Never use three dash markdown horizontal rule  
+• No need further remark or any chain of thought to be mentioned after the summary
+
+
+
 
 按以下參考格式提取內容並輸出成以下markdown format
 
