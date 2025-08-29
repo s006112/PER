@@ -1,2 +1,0 @@
-This is a test file for debugging the CIE chart plotting issue.
-The actual content doesn't matter since we're using hardcoded test data.
