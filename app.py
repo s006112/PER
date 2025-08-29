@@ -209,31 +209,46 @@ def handle_upload(file_path: str):
 # UI
 # ----------------------------
 with gr.Blocks(title="Photometric extraction") as demo:
+    # Minimal visible controls: Upload, Submit, Summary, CIE canvas
     with gr.Row():
         inp = gr.File(label="Upload PDF File", file_types=[".pdf"], type="filepath")
     btn = gr.Button("Submit")
 
-#    meta = gr.Markdown()
     combined_summary_box = gr.Textbox(label="Summary", lines=14, show_copy_button=True)
 
-    # CIE chart placed right BEFORE the original_text_box
+    # CIE chart
     gr.HTML(get_canvas_html(), elem_id="cie_box")
 
-    original_text_box = gr.Textbox(label="Sphere PDF extraction", lines=10, show_copy_button=True)
+    # Hidden (but present in DOM): original text and parsed CIE x,y table
+    # Keep DOM so the JS can read values for plotting.
+    original_text_box = gr.Textbox(
+        label="Sphere PDF extraction",
+        lines=10,
+        show_copy_button=True,
+        elem_id="original_text_box",
+    )
 
-    # NEW: show parsed CIE x,y matrix (参数, x, y)
     cct_xy_box = gr.Dataframe(
         label="CIE x,y (parsed from 光谱参数)",
         headers=["参数", "x", "y"],
         interactive=False,
-        elem_id="cct_xy_df",  # <-- add this line
+        elem_id="cct_xy_df",
     )
-    # Output order unchanged: meta, original_text_box, combined_summary_box
-#    btn.click(handle_upload, inputs=inp, outputs=[meta, original_text_box, combined_summary_box])
-#    btn.click(handle_upload, inputs=inp, outputs=[combined_summary_box])
+
+    # Hide the two components purely via CSS so they remain in the DOM
+    gr.HTML(
+        """
+        <style>
+          #cct_xy_df { display: none !important; }
+          #original_text_box { display: none !important; }
+        </style>
+        """
+    )
+
+    # Wire outputs: summary (visible), dataframe + original text (hidden but functional)
     btn.click(handle_upload, inputs=inp, outputs=[combined_summary_box, cct_xy_box, original_text_box])
 
-    # Run the JS after app loads (works in local and Spaces)
+    # Load JS for CIE canvas drawing
     demo.load(fn=lambda: None, inputs=[], outputs=[], js=get_drawing_javascript())
 
 if __name__ == "__main__":
