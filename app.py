@@ -217,38 +217,68 @@ CANVAS_HTML = """
 # IMPORTANT:
 # - Use demo.load(js=JS_DRAW) so it runs after app mounts.
 # - Use a Shadow-DOM–aware root: query inside <gradio-app>.shadowRoot when present.
+
 JS_DRAW = r"""
 () => {
   const MAX_RETRIES = 200;
-  let prevSig = ""; // avoid redundant redraws
+  let prevSig = "";          // avoid redundant redraws
+  let bgCanvas = null;       // cached background (axes/grid/planck/bins)
+  let canvasRef = null;      // hold canvas for addPoints/clearPoints API
+  const MAX_POINTS = 50;     // hard cap to avoid clutter
 
   function gradioRoot() {
     const ga = document.querySelector('gradio-app');
     return ga && ga.shadowRoot ? ga.shadowRoot : document;
   }
-
   function locateCanvas(root) {
     const host = root.getElementById("cie_box");
     const c = host ? host.querySelector("#cie") : root.getElementById("cie");
     return c || null;
   }
 
-  // NEW: extract [[param, x, y], ...] from the cct_xy Dataframe table
+  // Robustly extract [[label, x, y], ...] from cct_xy DataFrame
   function extractPoints(root){
     const host = root.getElementById("cct_xy_df");
     if(!host) return [];
-    const table = host.querySelector("table");
-    if(!table) return [];
-    const rows = Array.from(table.querySelectorAll("tbody tr"));
-    const pts = [];
-    for (const tr of rows){
-      const tds = tr.querySelectorAll("td");
-      if (tds.length >= 3){
-        const param = (tds[0].textContent || "").trim();
-        const x = parseFloat((tds[1].textContent || "").replace(/[^\d\.\-]/g,""));
-        const y = parseFloat((tds[2].textContent || "").replace(/[^\d\.\-]/g,""));
-        if (Number.isFinite(x) && Number.isFinite(y)) pts.push([param, x, y]);
+    const seen = new Set();
+    const pts  = [];
+
+    // 1) Preferred: parse all TBODY rows anywhere under cct_xy_df
+    const rows = Array.from(host.querySelectorAll("tbody tr"));
+    if (rows.length > 0){
+      for (const tr of rows){
+        const cells = tr.querySelectorAll("td,th");
+        if (cells.length >= 3){
+          const label = (cells[0].textContent || "").trim();
+          const x = parseFloat((cells[1].textContent || "").replace(/[^\d.\-]/g,""));
+          const y = parseFloat((cells[2].textContent || "").replace(/[^\d.\-]/g,""));
+          if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+          const k = x.toFixed(4)+","+y.toFixed(4);
+          if (seen.has(k)) continue;
+          seen.add(k);
+          pts.push([label, x, y]);
+          if (pts.length >= MAX_POINTS) break;
+        }
       }
+      if (pts.length) return pts;
+    }
+
+    // 2) Fallback: plain text parsing (comma/whitespace separated triplets)
+    const text = (host.textContent || "").trim();
+    if (!text) return [];
+    for (const line of text.split(/\n+/)){
+      // examples: "数值 1,0.3398,0.3509" or "数值1 0.3398 0.3509"
+      const m = line.match(/^\s*(.+?)\s*[,\s]\s*([+-]?\d*\.?\d+)\s*[,\s]\s*([+-]?\d*\.?\d+)\s*$/);
+      if (!m) continue;
+      const label = m[1].trim();
+      const x = parseFloat(m[2]);
+      const y = parseFloat(m[3]);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      const k = x.toFixed(4)+","+y.toFixed(4);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      pts.push([label, x, y]);
+      if (pts.length >= MAX_POINTS) break;
     }
     return pts;
   }
@@ -279,31 +309,30 @@ JS_DRAW = r"""
       {cct:6500, center:[0.3123,0.3283], corners:[[0.3205,0.3477],[0.3026,0.3311],[0.3067,0.3119],[0.3221,0.3255]]},
     ];
 
-    function drawAxes(){
-      ctx.clearRect(0,0,W,H);
-      ctx.fillStyle='#fff'; ctx.fillRect(0,0,W,H);
-      ctx.strokeStyle='#000'; ctx.lineWidth=1;
-      ctx.strokeRect(pad,pad,W-2*pad,H-2*pad);
-
-      ctx.font='12px sans-serif'; ctx.fillStyle='#000';
+    // --- Background drawing (axes, planck, bins) ---
+    function drawAxes(bg){
+      bg.clearRect(0,0,W,H);
+      bg.fillStyle='#fff'; bg.fillRect(0,0,W,H);
+      bg.strokeStyle='#000'; bg.lineWidth=1;
+      bg.strokeRect(pad,pad,W-2*pad,H-2*pad);
+      bg.font='12px sans-serif'; bg.fillStyle='#000';
       const step=0.02;
       for(let x=Math.ceil(xmin/step)*step; x<=xmax+1e-9; x+=step){
         const X=sx(x);
-        ctx.strokeStyle='#e6e6e6'; ctx.beginPath(); ctx.moveTo(X, sy(ymin)); ctx.lineTo(X, sy(ymax)); ctx.stroke();
-        ctx.strokeStyle='#999'; ctx.beginPath(); ctx.moveTo(X, sy(ymin)); ctx.lineTo(X, sy[ymin]-4); ctx.stroke(); // keep original behavior
-        ctx.fillStyle='#000'; ctx.fillText(x.toFixed(2), X-12, sy(ymin)+16);
+        bg.strokeStyle='#e6e6e6'; bg.beginPath(); bg.moveTo(X, sy(ymin)); bg.lineTo(X, sy(ymax)); bg.stroke();
+        bg.strokeStyle='#999';    bg.beginPath(); bg.moveTo(X, sy(ymin)); bg.lineTo(X, sy(ymin)-4); bg.stroke(); // fix: sy(ymin)
+        bg.fillStyle='#000'; bg.fillText(x.toFixed(2), X-12, sy(ymin)+16);
       }
       for(let y=Math.ceil(ymin/step)*step; y<=ymax+1e-9; y+=step){
         const Y=sy(y);
-        ctx.strokeStyle='#e6e6e6'; ctx.beginPath(); ctx.moveTo(sx(xmin), Y); ctx.lineTo(sx(xmax), Y); ctx.stroke();
-        ctx.strokeStyle='#999'; ctx.beginPath(); ctx.moveTo(sx(xmin), Y); ctx.lineTo(sx(xmin)-4, Y); ctx.stroke();
-        ctx.fillStyle='#000'; ctx.fillText(y.toFixed(2), sx(xmin)-40, Y+4);
+        bg.strokeStyle='#e6e6e6'; bg.beginPath(); bg.moveTo(sx(xmin), Y); bg.lineTo(sx(xmax), Y); bg.stroke();
+        bg.strokeStyle='#999';    bg.beginPath(); bg.moveTo(sx(xmin), Y); bg.lineTo(sx(xmin)-4, Y); bg.stroke();
+        bg.fillStyle='#000'; bg.fillText(y.toFixed(2), sx(xmin)-40, Y+4);
       }
-      ctx.fillStyle='#000';
-      ctx.fillText('x', sx(xmax)+10, sy(ymin)+4);
-      ctx.fillText('y', sx(xmin)-10, sy(ymax)-8);
+      bg.fillStyle='#000';
+      bg.fillText('x', sx(xmax)+10, sy(ymin)+4);
+      bg.fillText('y', sx(xmin)-10, sy(ymax)-8);
     }
-
     function planckXY(T){
       let x,y;
       if(T>=1667 && T<=4000){
@@ -311,7 +340,6 @@ JS_DRAW = r"""
       } else if(T>4000 && T<=25000){
         x = (-3.0258469e9)/(T*T*T) + (2.1070379e6)/(T*T) + (0.2226347e3)/T + 0.240390;
       } else { return [NaN,NaN]; }
-
       if(T>=1667 && T<=2222){
         y = -1.1063814*Math.pow(x,3) - 1.34811020*Math.pow(x,2) + 2.18555832*x - 0.20219683;
       } else if(T>2222 && T<=4000){
@@ -321,75 +349,94 @@ JS_DRAW = r"""
       }
       return [x,y];
     }
-
-    function drawPlanck(){
-      ctx.strokeStyle='#444'; ctx.lineWidth=1.5;
-      if (ctx.setLineDash) ctx.setLineDash([5,3]);
-      ctx.beginPath();
+    function drawPlanck(bg){
+      bg.strokeStyle='#444'; bg.lineWidth=1.5;
+      if (bg.setLineDash) bg.setLineDash([5,3]);
+      bg.beginPath();
       let started=false;
       for(let T=2000; T<=10000; T+=50){
         const [x,y]=planckXY(T); if (!isFinite(x)) continue;
         const X=sx(x), Y=sy(y);
-        if(!started){ ctx.moveTo(X,Y); started=true; } else { ctx.lineTo(X,Y); }
+        if(!started){ bg.moveTo(X,Y); started=true; } else { bg.lineTo(X,Y); }
       }
-      ctx.stroke();
-      if (ctx.setLineDash) ctx.setLineDash([]);
+      bg.stroke();
+      if (bg.setLineDash) bg.setLineDash([]);
     }
-
-    function drawBins(){
-      const palette=['#d81b60','#8e24aa','#3949ab','#1e88e5','#00897b','#43a047',
-                     '#fdd835','#fb8c00','#e53935','#6d4c41','#7b1fa2'];
+    function drawBins(bg){
+      const palette=['#d81b60','#8e24aa','#3949ab','#1e88e5','#00897b','#43a047','#fdd835','#fb8c00','#e53935','#6d4c41','#7b1fa2'];
       for(let i=0;i<bins.length;i++){
         const b=bins[i], color=palette[i%palette.length], P=b.corners;
-        ctx.lineWidth=2; ctx.strokeStyle=color; ctx.fillStyle=hexToRgba(color,0.16);
-        ctx.beginPath();
-        ctx.moveTo(sx(P[0][0]), sy(P[0][1]));
-        for(let j=1;j<P.length;j++){ ctx.lineTo(sx(P[j][0]), sy(P[j][1])); }
-        ctx.closePath(); ctx.fill(); ctx.stroke();
-
+        bg.lineWidth=2; bg.strokeStyle=color; bg.fillStyle=hexToRgba(color,0.16);
+        bg.beginPath();
+        bg.moveTo(sx(P[0][0]), sy(P[0][1]));
+        for(let j=1;j<P.length;j++){ bg.lineTo(sx(P[j][0]), sy(P[j][1])); }
+        bg.closePath(); bg.fill(); bg.stroke();
         const cx=sx(b.center[0]), cy=sy(b.center[1]);
-        ctx.fillStyle=color; ctx.beginPath(); ctx.arc(cx,cy,3,0,Math.PI*2); ctx.fill();
-        ctx.font='12px sans-serif'; ctx.fillText(b.cct+'K', cx+6, cy-6);
+        bg.fillStyle=color; bg.beginPath(); bg.arc(cx,cy,3,0,Math.PI*2); bg.fill();
+        bg.font='12px sans-serif'; bg.fillText(b.cct+'K', cx+6, cy-6);
       }
     }
 
-    // NEW: draw points as cross symbols "╳"
+    function ensureBackground(){
+      if (bgCanvas) return bgCanvas;
+      const oc = document.createElement('canvas'); oc.width=W; oc.height=H;
+      const bg = oc.getContext('2d');
+      drawAxes(bg); drawPlanck(bg); drawBins(bg);
+      bgCanvas = oc;
+      return bgCanvas;
+    }
+
     function drawPoints(points){
       if (!Array.isArray(points) || !points.length) return;
-      const size = 6;
-      ctx.strokeStyle = '#000';
-      ctx.lineWidth = 2;
-      for (const p of points){
-        const X = sx(p[1]), Y = sy(p[2]);
-        if (!isFinite(X) || !isFinite(Y)) continue;
+      const size = 4;
+      // halo
+      ctx.lineWidth = 1; ctx.strokeStyle = '#fff';
+      for (const [_,x,y] of points){
+        if (x < xmin || x > xmax || y < ymin || y > ymax) continue;
+        const X=sx(x), Y=sy(y);
         ctx.beginPath();
-        ctx.moveTo(X - size, Y - size);
-        ctx.lineTo(X + size, Y + size);
-        ctx.moveTo(X - size, Y + size);
-        ctx.lineTo(X + size, Y - size);
+        ctx.moveTo(X - size, Y - size); ctx.lineTo(X + size, Y + size);
+        ctx.moveTo(X - size, Y + size); ctx.lineTo(X + size, Y - size);
+        ctx.stroke();
+      }
+      // black overlay
+      ctx.lineWidth = 1; ctx.strokeStyle = '#000';
+      for (const [_,x,y] of points){
+        if (x < xmin || x > xmax || y < ymin || y > ymax) continue;
+        const X=sx(x), Y=sy(y);
+        ctx.beginPath();
+        ctx.moveTo(X - size, Y - size); ctx.lineTo(X + size, Y + size);
+        ctx.moveTo(X - size, Y + size); ctx.lineTo(X + size, Y - size);
         ctx.stroke();
       }
     }
 
-    drawAxes(); drawPlanck(); drawBins();
-    if (Array.isArray(points)) drawPoints(points); // <- overlay
+    // compose: bg + points
+    ensureBackground();
+    ctx.clearRect(0,0,W,H);
+    ctx.drawImage(bgCanvas, 0, 0);
+    if (Array.isArray(points) && points.length) drawPoints(points);
   }
 
-  // NEW: observe dataframe changes and redraw when cct_xy updates
+  // Watch dataframe changes and redraw
   function observeDataframe(root, canvas){
     const host = root.getElementById("cct_xy_df");
     if (!host) return;
+    let rafId = null;
     const update = () => {
       const pts = extractPoints(root);
       const sig = JSON.stringify(pts);
       if (sig !== prevSig){
         prevSig = sig;
-        try { draw(canvas, pts); } catch(e){ console.error("CIE redraw error:", e); }
+        if (rafId) cancelAnimationFrame(rafId);
+        rafId = requestAnimationFrame(() => {
+          try { draw(canvas, pts); } catch(e){ console.error("CIE redraw error:", e); }
+        });
       }
     };
     const mo = new MutationObserver(update);
     mo.observe(host, {subtree:true, childList:true, characterData:true});
-    update(); // initial
+    update();
   }
 
   let tries = 0;
@@ -397,8 +444,12 @@ JS_DRAW = r"""
     const root = gradioRoot();
     const canvas = locateCanvas(root);
     if (canvas) {
+      canvasRef = canvas;
       try { draw(canvas, extractPoints(root)); } catch(e){ console.error("CIE draw error:", e); }
       observeDataframe(root, canvas);
+      // programmatic APIs (kept stable)
+      window.addPoints   = (pts) => { try { draw(canvasRef, Array.isArray(pts)? pts.slice(0,MAX_POINTS): []); } catch(e){} };
+      window.clearPoints = ()   => { try { draw(canvasRef, []); } catch(e){} };
       return;
     }
     if (tries++ < MAX_RETRIES) {
@@ -409,7 +460,6 @@ JS_DRAW = r"""
   })();
 }
 """
-
 
 
 # ----------------------------
