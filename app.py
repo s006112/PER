@@ -1,15 +1,8 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Gradio single-file app:
-- Upload PDF -> parse text
-- Show meta, Summary, CIE chart, and original text (Sphere PDF extraction)
-"""
 from __future__ import annotations
 
 import os
 import re
-from typing import Tuple
+from typing import Tuple, List
 from dotenv import load_dotenv
 from pathlib import Path
 import gradio as gr
@@ -24,7 +17,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # ----------------------------
 def extract_pdf_text_from_bytes(data: bytes) -> Tuple[str, str]:
     """
-    Parse PDF into plain text. Prefer PyMuPDF.
+    Parse PDF bytes into plain text using PyMuPDF when available.
     Returns: (engine_name, text)
     """
     try:
@@ -40,9 +33,6 @@ def extract_pdf_text_from_bytes(data: bytes) -> Tuple[str, str]:
 # OpenAI helper
 # ----------------------------
 def query_openai_with_prompt(prompt_content: str, text: str) -> str:
-    """
-    Directly call OpenAI chat completion: prompt + context
-    """
     try:
         if "{context}" in prompt_content:
             final_prompt = prompt_content.replace("{context}", text)
@@ -62,34 +52,36 @@ def query_openai_with_prompt(prompt_content: str, text: str) -> str:
 # Upload handler
 # ----------------------------
 
-def handle_upload(file_path: str):
+def handle_upload(file_path: str) -> Tuple[str, List[List[float | str]], str]:
     """
-    Gradio callback: read file path, parse PDF, call OpenAI with two prompts
-    Returns: combined_summary (str), cct_xy (list[list])  # [[参数, x, y], ...]
+    Gradio callback
+    - Read PDF path, extract text
+    - Query OpenAI twice (details + summary)
+    - Parse CIE 1931 (x,y) from the details markdown table
+
+    Returns:
+      combined_summary (str), cct_xy ([[label, x, y], ...]), original_text (str)
     """
-    import os
-    import re
-    from pathlib import Path
 
     if not file_path or not os.path.isfile(file_path):
-        return "Error: No file found.", []
+        return "Error: No file found.", [], ""
 
     with open(file_path, "rb") as f:
         data = f.read()
 
-    engine, text = extract_pdf_text_from_bytes(data)
+    _engine, text = extract_pdf_text_from_bytes(data)
     if not text:
-        return "Error: PDF parsing failed.", []
+        return "Error: PDF parsing failed.", [], ""
 
     base_dir = Path(__file__).parent
     try:
         prompt_md_str = (base_dir / "Prompt_md.txt").read_text("utf-8")
     except Exception as e:
-        return f"Error reading Prompt_md.txt: {e}", []
+        return f"Error reading Prompt_md.txt: {e}", [], ""
     try:
         prompt_summary_str = (base_dir / "Prompt_summary.txt").read_text("utf-8")
     except Exception as e:
-        return f"Error reading Prompt_summary.txt: {e}", []
+        return f"Error reading Prompt_summary.txt: {e}", [], ""
 
     openai_md_response = query_openai_with_prompt(prompt_md_str, text)
     openai_summary_response = query_openai_with_prompt(prompt_summary_str, openai_md_response)
@@ -101,11 +93,11 @@ def handle_upload(file_path: str):
         f"{openai_md_response}"
     )
 
-    # --- Parse "### 光谱参数" table for 色坐标 (x, y) into cct_xy matrix
-    # Requirements:
-    # - cct_xy item count reflects the number of data rows (single or multiple).
-    # - 参数 content is column 1 of the table (1-based), i.e., the first column (index 0).
-    # - Count row cell numbers first and only build entries from rows with enough cells.
+    # Extract CIE 1931 (x,y) rows from the "### Spectral Parameters" table
+    # - Find the section by heading text
+    # - Locate the table header containing "CIE 1931"
+    # - Interpret the first column as a label, but prefer a header named "Product Number" if present
+    # - Only include rows with numeric x,y values
     def _extract_cct_xy(md: str):
         try:
             lines = md.splitlines()
@@ -145,7 +137,7 @@ def handle_upload(file_path: str):
             if not rows:
                 return []
 
-            # Find header row (contains column names including CIE 1931)
+            # Find header row (must contain "CIE 1931")
             header_idx = None
             for idx, r in enumerate(rows):
                 if any("CIE 1931" in c for c in r):
@@ -156,30 +148,29 @@ def handle_upload(file_path: str):
 
             header = rows[header_idx]
 
-            # Determine indices with robustness
+            # Determine column indices
             try:
                 xy_col = next(i for i, c in enumerate(header) if "CIE 1931" in c)
             except StopIteration:
                 return []
 
-            # 参数 is specified as column 1 (1-based) => index 0; but if a header named 参数 exists elsewhere, prefer that.
+            # Prefer a "Product Number" header as label; otherwise use column 0
             param_col = 0
             for i, c in enumerate(header):
                 if "Product Number" in c:
                     param_col = i
                     break
 
-            # Count row cell numbers first; only keep rows with enough cells
+            # Only keep rows with enough cells
             required_cols = max(param_col, xy_col) + 1
             data_rows = [r for r in rows[header_idx + 1:] if len(r) >= required_cols]
-            # At this point, cct_xy length should match valid data_rows length (may be 0, 1, or many)
             if not data_rows:
                 return []
 
             out = []
             for r in data_rows:
                 xy_text = r[xy_col]
-                # tolerant match: "0.3191, 0.2190" with optional spaces
+                # Match "0.3191, 0.2190" with optional spaces
                 m = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*,\s*([0-9]+(?:\.[0-9]+)?)", xy_text)
                 if not m:
                     continue
@@ -189,7 +180,7 @@ def handle_upload(file_path: str):
                 except Exception:
                     continue
 
-                # 参数 content as column 1
+                # Label from chosen column, fallback to row index
                 param = r[param_col] if len(r) > param_col and r[param_col] else f"行{len(out)+1}"
                 out.append([param, x, y])
 
@@ -200,10 +191,6 @@ def handle_upload(file_path: str):
     cct_xy = _extract_cct_xy(openai_md_response)
 
     return combined_summary, cct_xy, text
-
-
-
-
 
 # ----------------------------
 # UI
@@ -229,13 +216,13 @@ with gr.Blocks(title="Photometric extraction") as demo:
     )
 
     cct_xy_box = gr.Dataframe(
-        label="CIE x,y (parsed from 光谱参数)",
+        label="CIE x,y (parsed from Spectral Parameters)",
         headers=["参数", "x", "y"],
         interactive=False,
         elem_id="cct_xy_df",
     )
 
-    # Hide the two components purely via CSS so they remain in the DOM
+    # Hide the two components via CSS so they remain in the DOM
     gr.HTML(
         """
         <style>
