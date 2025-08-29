@@ -1,13 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-CIE 1931 Canvas Rendering Module
-
-Optimized module for rendering CIE 1931 chromaticity diagrams with ANSI C78.377-2015 
-chromaticity quadrangles. Provides HTML canvas template and JavaScript drawing code.
-"""
-
-from typing import List, Tuple
 import json
 
 # Constants
@@ -26,30 +16,20 @@ CIE_BINS = [
     {"cct": 6500, "center": [0.3123, 0.3283], "corners": [[0.3205, 0.3477], [0.3026, 0.3311], [0.3067, 0.3119], [0.3221, 0.3255]]},
 ]
 
-
-def calculate_planck_xy(temperature: float) -> Tuple[float, float]:
-    """Calculate CIE x,y coordinates for a given color temperature using Planck's law."""
-    if not (1667 <= temperature <= 25000):
-        return (float('nan'), float('nan'))
-    
-    # Calculate x coordinate
-    if 1667 <= temperature <= 4000:
-        x = ((-0.2661239e9) / (temperature**3) - (0.2343580e6) / (temperature**2) + 
-             (0.8776956e3) / temperature + 0.179910)
-    else:  # 4000 < temperature <= 25000
-        x = ((-3.0258469e9) / (temperature**3) + (2.1070379e6) / (temperature**2) + 
-             (0.2226347e3) / temperature + 0.240390)
-    
-    # Calculate y coordinate
-    if 1667 <= temperature <= 2222:
-        y = (-1.1063814 * x**3 - 1.34811020 * x**2 + 2.18555832 * x - 0.20219683)
-    elif 2222 < temperature <= 4000:
-        y = (-0.9549476 * x**3 - 1.37418593 * x**2 + 2.09137015 * x - 0.16748867)
-    else:
-        y = (3.0817580 * x**3 - 5.87338670 * x**2 + 3.75112997 * x - 0.37001483)
-    
-    return (x, y)
-
+# Centralized Planck polynomial coefficients (single source of truth)
+# x polynomials for ranges: [1667, 4000], (4000, 25000]
+PLANCK_X = [
+    # ax/T^3 + bx/T^2 + cx/T + dx
+    {"range": (1667.0, 4000.0), "a": -0.2661239e9, "b": -0.2343580e6, "c": 0.8776956e3, "d": 0.179910},
+    {"range": (4000.0, 25000.0), "a": -3.0258469e9, "b": 2.1070379e6, "c": 0.2226347e3, "d": 0.240390},
+]
+# y polynomials for ranges: [1667, 2222], (2222, 4000], (4000, 25000]
+PLANCK_Y = [
+    # ay*x^3 + by*x^2 + cy*x + dy (x is from PLANCK_X result)
+    {"range": (1667.0, 2222.0), "a": -1.1063814,  "b": -1.34811020, "c": 2.18555832, "d": -0.20219683},
+    {"range": (2222.0, 4000.0), "a": -0.9549476,  "b": -1.37418593, "c": 2.09137015, "d": -0.16748867},
+    {"range": (4000.0, 25000.0), "a":  3.0817580,  "b": -5.87338670, "c": 3.75112997, "d": -0.37001483},
+]
 
 def get_canvas_html() -> str:
     """Get the CIE 1931 canvas HTML template."""
@@ -63,10 +43,12 @@ def get_canvas_html() -> str:
 </div>
 """
 
-
 def get_drawing_javascript() -> str:
     """Get the complete CIE 1931 canvas drawing JavaScript code."""
     bins_json = json.dumps(CIE_BINS)
+    # Inject centralized Planck coefficients to avoid duplicating formulas
+    planck_x = json.dumps(PLANCK_X)
+    planck_y = json.dumps(PLANCK_Y)
     return f"""
 () => {{
   const MAX_RETRIES = {MAX_RETRIES};
@@ -74,6 +56,8 @@ def get_drawing_javascript() -> str:
   let prevSig = "";
   let bgCanvas = null;
   let canvasRef = null;
+  const PLANCK_X = {planck_x};
+  const PLANCK_Y = {planck_y};
 
   function gradioRoot() {{
     const ga = document.querySelector('gradio-app');
@@ -170,19 +154,16 @@ def get_drawing_javascript() -> str:
     }}
 
     function planckXY(T){{
-      let x,y;
-      if(T>=1667 && T<=4000){{
-        x = (-0.2661239e9)/(T*T*T) - (0.2343580e6)/(T*T) + (0.8776956e3)/T + 0.179910;
-      }} else if(T>4000 && T<=25000){{
-        x = (-3.0258469e9)/(T*T*T) + (2.1070379e6)/(T*T) + (0.2226347e3)/T + 0.240390;
-      }} else {{ return [NaN,NaN]; }}
-      if(T>=1667 && T<=2222){{
-        y = -1.1063814*Math.pow(x,3) - 1.34811020*Math.pow(x,2) + 2.18555832*x - 0.20219683;
-      }} else if(T>2222 && T<=4000){{
-        y = -0.9549476*Math.pow(x,3) - 1.37418593*Math.pow(x,2) + 2.09137015*x - 0.16748867;
-      }} else {{
-        y = 3.0817580*Math.pow(x,3) - 5.87338670*Math.pow(x,2) + 3.75112997*x - 0.37001483;
-      }}
+      const t = Number(T);
+      if (!(t >= 1667 && t <= 25000)) return [NaN, NaN];
+      const xr = PLANCK_X[0].range, xc0 = PLANCK_X[0], xc1 = PLANCK_X[1];
+      const c = (t >= xr[0] && t <= xr[1]) ? xc0 : xc1;
+      const x = (c.a/(t*t*t)) + (c.b/(t*t)) + (c.c/t) + c.d;
+      const yr0 = PLANCK_Y[0].range, yr1 = PLANCK_Y[1].range;
+      const yc = (t >= yr0[0] && t <= yr0[1]) ? PLANCK_Y[0]
+               : (t > yr1[0] && t <= yr1[1]) ? PLANCK_Y[1]
+               : PLANCK_Y[2];
+      const y = yc.a*(x*x*x) + yc.b*(x*x) + yc.c*x + yc.d;
       return [x,y];
     }}
 

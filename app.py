@@ -110,7 +110,7 @@ def handle_upload(file_path: str):
         try:
             lines = md.splitlines()
 
-            # Locate the "### 光谱参数" section
+            # Locate the "### Spectral Parameters" section
             start = None
             for i, ln in enumerate(lines):
                 s = ln.strip()
@@ -145,7 +145,7 @@ def handle_upload(file_path: str):
             if not rows:
                 return []
 
-            # Find header row (contains column names including CIE 1931 and likely 参数)
+            # Find header row (contains column names including CIE 1931)
             header_idx = None
             for idx, r in enumerate(rows):
                 if any("CIE 1931" in c for c in r):
