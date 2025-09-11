@@ -10,26 +10,27 @@ All parameters and text must be quoted exactly from the PDF, without additions, 
 If text is unrecognizable or contains special symbols, keep it exactly as is
 Calculate CRI (Color Rendering Index): compute the arithmetic mean of R1–R14 for each sample, rounded to one decimal place; insert the result into the placeholder “$$$” in the template
 If multiple datasets are found, merge them into a single table, ordered by dataset sequence
-Output only to the following separate three tables in the exact given format, preserving column names, order, punctuation, and structure; fill extracted values into the cells; leave blanks as empty strings
-Do not output anything other than the three tables (no explanations, headings, notes, or code blocks)
+Output only to the following table in the exact given format, preserving column names, order, punctuation, and structure; fill extracted values into the cells; leave blanks as empty strings
+Only numerical data in the cell, without unit.
+Do not output anything other than the folling table (no explanations, headings, notes, or code blocks)
 
 ---
 
 ### Product category: @@@
 
-| Product Model | Product Number | Remarks          | CCT    | Luminous Flux Φ | Luminous Efficacy | Power (W) | Current (A) | Power Factor | Ra  | R9  | CIE 1931 (x, y) |
+| Product Model | Product Number | Remarks          | CCT (K)    | Luminous Flux (lm) | Luminous Efficacy (lm/W) | Power (W) | Current (A) | Power Factor | Ra  | R9  | CIE 1931 (x, y) |
 | ------------- | -------------- | ---------------- | ------ | --------------- | ----------------- | --------- | ----------- | ------------ | --- | --- | --------------- |
-| Panel Light 1 | #1             | LM281B+ 80 3500K | 4085 K | 3373 lm         | 158.31 lm/W       | 21.31 W   | 0.1788 A    | 0.9928       | 81  | 4   | 0.3774, 0.3772  |
-| Panel Light 2 | #2             | LM281B+ 80 4000K | 4085 K | 3373 lm         | 158.31 lm/W       | 21.31 W   | 0.1788 A    | 0.9928       | 81  | 4   | 0.3774, 0.3772  |
-| Panel Light 3 | #3             | LM281B+ 80 5000K | 4085 K | 3373 lm         | 158.31 lm/W       | 21.31 W   | 0.1788 A    | 0.9928       | 81  | 4   | 0.3774, 0.3772  |
+| Panel Light 1 | #1             | 3500K | 4085 | 3373         | 158.31       | 21.31   | 0.1788    | 0.9928       | 81  | 4   | 0.3774, 0.3772  |
+| Panel Light 2 | #2             | 4000K | 4085 | 3373         | 158.31       | 21.31   | 0.1788    | 0.9928       | 81  | 4   | 0.3774, 0.3772  |
+| Panel Light 3 | #3             | 5000K | 4085 | 3373         | 158.31       | 21.31   | 0.1788    | 0.9928       | 81  | 4   | 0.3774, 0.3772  |
 
 ### Spectral Parameters
 
-| Product Number | Voltage V | CIE 1976 (u', v') | Duv    | Purity | Dominant Wavelength (λd) | Peak Wavelength (λp) | FWHM    | Radiant Flux Φe |
+| Product Number | Voltage V | CIE 1976 (u', v') | Duv    | Purity (%) | Dominant Wavelength (λd) | Peak Wavelength (λp nm) | FWHM (nm)   | Radiant Flux (Φe/W)|
 | -------------- | --------- | ----------------- | ------ | ------ | ------------------------ | -------------------- | ------- | --------------- |
-| #1             | 120.05 V  | 0.2230, 0.5013    | 0.0011 | 26.5%  | 578.1 nm                 | 450.2 nm             | 18.4 nm | 10.15 W         |
-| #2             | 120.05 V  | 0.2230, 0.5013    | 0.0011 | 26.5%  | 578.1 nm                 | 450.2 nm             | 18.4 nm | 10.15 W         |
-| #3             | 120.05 V  | 0.2230, 0.5013    | 0.0011 | 26.5%  | 578.1 nm                 | 450.2 nm             | 18.4 nm | 10.15 W         |
+| #1             | 120.05  | 0.2230, 0.5013    | 0.0011 | 26.5  | 578.1                 | 450.2              | 18.4  | 10.15          |
+| #2             | 120.05  | 0.2230, 0.5013    | 0.0011 | 26.5  | 578.1                 | 450.2             | 18.4 | 10.15         |
+| #3             | 120.05  | 0.2230, 0.5013    | 0.0011 | 26.5  | 578.1                 | 450.2             | 18.4 | 10.15         |
 
 ### Color Rendering Index (CRI)
 
@@ -38,6 +39,4 @@ Do not output anything other than the three tables (no explanations, headings, n
 | #1             | $$$        | 81  | 89  | 95  | 81  | 81  | 85  | 86  | 63  | 63  | 4   | 75  | 81  | 60  | 83  | 98  | 74  |
 | #2             | $$$        | 81  | 89  | 95  | 81  | 81  | 85  | 86  | 63  | 63  | 4   | 75  | 81  | 60  | 83  | 98  | 74  |
 | #3             | $$$        | 81  | 89  | 95  | 81  | 81  | 85  | 86  | 63  | 63  | 4   | 75  | 81  | 60  | 83  | 98  | 74  |
-
-
 
