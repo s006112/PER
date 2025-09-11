@@ -12,7 +12,8 @@ Calculate CRI (Color Rendering Index): compute the arithmetic mean of R1–R14 f
 If multiple datasets are found, merge them into a single table, ordered by dataset sequence
 Output only to the following table in the exact given format, preserving column names, order, punctuation, and structure; fill extracted values into the cells; leave blanks as empty strings
 Only numerical data in the cell, without unit.
-Do not output anything other than the folling table (no explanations, headings, notes, or code blocks)
+Output only to the following separate three tables in the exact given format, preserving column names, order, punctuation, and structure; fill extracted values into the cells; leave blanks as empty strings
+Do not output anything other than the three tables (no explanations, headings, notes, or code blocks)
 
 ---
 
