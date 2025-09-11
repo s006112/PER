@@ -88,7 +88,6 @@ def handle_upload(file_path: str) -> Tuple[str, List[List[float | str]], str]:
 
     # Standard header for combined summary
     header_block = (
-        "---\n\n"
         "## XXXXXX photometry result summary and analysis\n"
         "![](https://baltech-industry.com/PER/ampco.png)\n\n"
     )
