@@ -106,7 +106,7 @@ def handle_upload(file_path: str) -> Tuple[str, List[List[float | str]], str]:
             start = None
             for i, ln in enumerate(lines):
                 s = ln.strip()
-                if s.startswith("###") and "Spectral Parameters" in s:
+                if s.startswith("###") and "Product category" in s:
                     start = i
                     break
             if start is None:
