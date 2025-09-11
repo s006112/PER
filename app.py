@@ -86,7 +86,15 @@ def handle_upload(file_path: str) -> Tuple[str, List[List[float | str]], str]:
     openai_md_response = query_openai_with_prompt(prompt_md_str, text)
     openai_summary_response = query_openai_with_prompt(prompt_summary_str, openai_md_response)
 
+    # Standard header for combined summary
+    header_block = (
+        "---\n\n"
+        "## XXXXXX photometry result summary and analysis\n"
+        "![](https://baltech-industry.com/PER/ampco.png)\n\n"
+    )
+
     combined_summary = (
+        f"{header_block}"
         "## Overall summary\n"
         f"{openai_summary_response}\n\n"
         "---\n"
