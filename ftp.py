@@ -83,7 +83,7 @@ def upload_via_ftps(
             ftps.login(user=username, passwd=password)
             ftps.prot_p()
             with open(local_path, "rb") as f:
-                cmd = f"STOR {remote_filename}"
+                cmd = f"STOR /public_html/PER/CIE/{remote_filename}"
                 ftps.storbinary(cmd, f)
             try:
                 ftps.quit()
