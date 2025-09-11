@@ -54,6 +54,7 @@ def get_drawing_javascript() -> str:
   const MAX_RETRIES = {MAX_RETRIES};
   const MAX_POINTS = {MAX_POINTS};
   let prevSig = "";
+  let lastDownloadedSig = "";
   let bgCanvas = null;
   let canvasRef = null;
   const PLANCK_X = {planck_x};
@@ -246,6 +247,23 @@ def get_drawing_javascript() -> str:
         if (rafId) cancelAnimationFrame(rafId);
         rafId = requestAnimationFrame(() => {{
           try {{ draw(canvas, pts); }} catch(e){{ console.error("CIE redraw error:", e); }}
+          try {{
+            // Auto-download PNG only when points exist (after Submit) and state is new
+            if (Array.isArray(pts) && pts.length > 0 && sig !== lastDownloadedSig) {{
+              lastDownloadedSig = sig;
+              const now = new Date();
+              const pad = (n) => String(n).padStart(2,'0');
+              const ts = `${{now.getFullYear()}}-${{pad(now.getMonth()+1)}}-${{pad(now.getDate())}}_${{pad(now.getHours())}}-${{pad(now.getMinutes())}}-${{pad(now.getSeconds())}}`;
+              const fname = `CIE_${{ts}}.png`;
+              const url = canvas.toDataURL('image/png');
+              const a = document.createElement('a');
+              a.href = url; a.download = fname;
+              // Some browsers require element in DOM
+              document.body.appendChild(a);
+              a.click();
+              a.remove();
+            }}
+          }} catch(e){{ console.error('CIE auto-download error:', e); }}
         }});
       }}
     }};
@@ -274,5 +292,3 @@ def get_drawing_javascript() -> str:
   }})();
 }}
 """
-
-
