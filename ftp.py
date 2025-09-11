@@ -1,4 +1,3 @@
-import base64
 import logging
 import os
 import sys
@@ -19,17 +18,7 @@ def setup_logging() -> logging.Logger:
     )
     return logging.getLogger(LOGGER_NAME)
 
-
-def create_dummy_png(path: str) -> None:
-    """Create a 1x1 PNG file at the given path without external deps."""
-    # 1x1 transparent PNG
-    png_b64 = (
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAA"
-        "AAC0lEQVR42mP8/x8AAwMCAO2Z0NsAAAAASUVORK5CYII="
-    )
-    data = base64.b64decode(png_b64)
-    with open(path, "wb") as f:
-        f.write(data)
+ 
 
 
 class ReuseFTPS(FTP_TLS):
@@ -198,17 +187,12 @@ def main() -> int:
 
     logger.info("Configured host=%s port=%s user=%s", host, port, user)
 
-    # Create dummy PNG if it doesn't exist or if forced
+    # Verify local file exists
     if not os.path.exists(local_path):
-        logger.info("Creating dummy PNG at %s", local_path)
-        try:
-            create_dummy_png(local_path)
-            logger.info("Dummy PNG created: %s", local_path)
-        except Exception as e:
-            logger.error("Failed to create dummy PNG: %s", e)
-            return 1
+        logger.error("Local file does not exist: %s", local_path)
+        return 1
     else:
-        logger.info("Local file already exists, reusing: %s", local_path)
+        logger.info("Local file exists: %s", local_path)
 
     # Perform upload
     try:
