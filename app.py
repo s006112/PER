@@ -10,7 +10,8 @@ from dotenv import load_dotenv
 from pathlib import Path
 import gradio as gr
 from openai import OpenAI
-from cie1931 import get_canvas_html, get_drawing_javascript, upload_saved_plot
+from cie1931 import get_canvas_html, get_drawing_javascript
+import ftp
 
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -221,10 +222,9 @@ def handle_cie_png_upload(payload: str) -> str:
             return ""
         b64 = data_url.split("base64,", 1)[-1]
         raw = base64.b64decode(b64)
-        out_path = Path(__file__).parent / fname
-        out_path.write_bytes(raw)
         try:
-            upload_saved_plot(str(out_path))
+            # Upload directly from memory without saving to disk
+            ftp.upload_file(remote_name=fname, data=raw)
             return f"Uploaded {fname}"
         except Exception as e:
             logging.getLogger("ftps_upload").error("Upload trigger failed: %s", e)

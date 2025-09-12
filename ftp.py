@@ -4,6 +4,7 @@ import socket
 import ssl
 import ftplib
 from ftplib import FTP_TLS
+import io
 
 
 LOGGER_NAME = "ftps_upload"
@@ -50,6 +51,7 @@ def upload_file(
     port: int | None = None,
     username: str | None = None,
     password: str | None = None,
+    data: bytes | None = None,
     logger: logging.Logger | None = None,
 ) -> None:
     """Upload a file to the configured FTPS server.
@@ -71,7 +73,12 @@ def upload_file(
     username = username or os.getenv("FTP_USER")
     password = password or os.getenv("FTP_PASS")
     local_path = local_path or os.getenv("FTP_LOCAL_PATH", "dummy.png")
-    remote_name = remote_name or os.getenv("FTP_REMOTE_FILENAME", os.path.basename(local_path))
+    # If uploading from in-memory data, caller should pass remote_name explicitly or rely on env
+    if remote_name is None:
+        if data is None:
+            remote_name = os.getenv("FTP_REMOTE_FILENAME", os.path.basename(local_path))
+        else:
+            remote_name = os.getenv("FTP_REMOTE_FILENAME", "upload.png")
 
     attempts = [
         {"passive": True, "use_epsv": True},   # Try EPSV passive (often best behind NAT)
@@ -101,9 +108,15 @@ def upload_file(
             ftps.connect(host=host, port=port, timeout=30)
             ftps.login(user=username, passwd=password)
             ftps.prot_p()
-            with open(local_path, "rb") as f:
+            # Choose source: in-memory bytes or local file path
+            if data is not None:
+                fobj = io.BytesIO(data)
                 cmd = f"STOR /public_html/PER/CIE/{remote_name}"
-                ftps.storbinary(cmd, f)
+                ftps.storbinary(cmd, fobj)
+            else:
+                with open(local_path, "rb") as f:
+                    cmd = f"STOR /public_html/PER/CIE/{remote_name}"
+                    ftps.storbinary(cmd, f)
             try:
                 ftps.quit()
             finally:
