@@ -81,6 +81,15 @@ def upload_file(
         else:
             remote_name = os.getenv("FTP_REMOTE_FILENAME", "upload.png")
 
+    logger.info(
+        "Preflight: host=%s port=%s timeout=%ss data=%s remote_name=%s",
+        host,
+        port,
+        timeout,
+        "yes" if data is not None else "no",
+        remote_name,
+    )
+
     attempts = [
         {"passive": True, "use_epsv": True},   # Try EPSV passive (often best behind NAT)
         {"passive": True, "use_epsv": False},  # Try PASV passive
@@ -114,11 +123,26 @@ def upload_file(
             ftps = ReuseFTPS(context=context)
             ftps.set_debuglevel(1)
 
-            if use_epsv:
-                ftps.af = socket.AF_INET6
+            # Decide address family (decoupled from EPSV). Allow override by env.
+            af_env = os.getenv("FTP_AF", "").lower()
+            prefer_af: socket.AddressFamily
+            if af_env in ("ipv4", "inet", "4"):
+                prefer_af = socket.AF_INET
+            elif af_env in ("ipv6", "inet6", "6"):
+                prefer_af = socket.AF_INET6
             else:
-                ftps.af = socket.AF_INET
+                try:
+                    families = {ai[0] for ai in gai}  # type: ignore[name-defined]
+                except Exception:
+                    families = set()
+                if socket.AF_INET in families and socket.AF_INET6 not in families:
+                    prefer_af = socket.AF_INET
+                elif socket.AF_INET6 in families and socket.AF_INET not in families:
+                    prefer_af = socket.AF_INET6
+                else:
+                    prefer_af = socket.AF_INET
 
+            ftps.af = prefer_af
             logger.info("Address family selected: %s", "AF_INET6" if ftps.af == socket.AF_INET6 else "AF_INET")
             ftps.set_pasv(passive)
             logger.info("PASV set to: %s", passive)
