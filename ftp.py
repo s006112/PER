@@ -101,6 +101,80 @@ def _http_upload(remote_name: str, content: bytes, *, url: str, token: str | Non
             raise urllib.error.HTTPError(url, status, "Upload failed", resp.headers, None)
 
 
+def check_connectivity(logger: logging.Logger | None = None) -> str:
+    """Quick connectivity probe.
+
+    - If FTP_HTTP_UPLOAD_URL is set, performs a lightweight GET request.
+    - Otherwise, attempts FTPS control connection + NOOP using current config
+      with the same IPv4 + port selection logic and short timeouts on Spaces.
+    Returns a concise status string.
+    """
+    if logger is None:
+        logger = _get_logger()
+
+    http_url = os.getenv("FTP_HTTP_UPLOAD_URL")
+    http_timeout = int(os.getenv("FTP_CONNECT_TIMEOUT", "8" if os.getenv("SPACE_ID") else "30"))
+    if http_url:
+        try:
+            # Allow GET/HEAD; some endpoints may not support HEAD, so use GET with a probe param
+            probe = http_url + ("&" if "?" in http_url else "?") + "probe=1"
+            req = urllib.request.Request(probe, method="GET")
+            with urllib.request.urlopen(req, timeout=http_timeout) as resp:
+                status = getattr(resp, 'status', 200)
+                return f"HTTPS reachable (status {status})"
+        except Exception as e:
+            return f"HTTPS not reachable: {e}"
+
+    host = os.getenv("FTP_HOST", "ftp.baltech-industry.com")
+    port_cfg = int(os.getenv("FTP_PORT", "21"))
+    in_spaces = bool(os.getenv("SPACE_ID"))
+    timeout = int(os.getenv("FTP_CONNECT_TIMEOUT", "8" if in_spaces else "30"))
+
+    # Port list logic mirrors upload_file
+    port_list = [port_cfg]
+    alt = os.getenv("FTP_ALT_PORTS", "").strip()
+    if alt:
+        for p in alt.split(','):
+            p = p.strip()
+            if p.isdigit():
+                iv = int(p)
+                if iv not in port_list:
+                    port_list.append(iv)
+    if in_spaces and 990 not in port_list:
+        port_list.append(990)
+
+    for p in port_list:
+        try:
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            ftps = ReuseFTPS(context=ctx)
+            ftps.set_debuglevel(1)
+            ftps.af = socket.AF_INET  # IPv4
+            connect_host = _resolve_ipv4(host, p)
+            ftps.connect(host=connect_host, port=p, timeout=timeout)
+            user = os.getenv("FTP_USER"); pw = os.getenv("FTP_PASS")
+            ftps.login(user=user, passwd=pw)
+            ftps.prot_p()
+            try:
+                ftps.voidcmd('NOOP')
+            finally:
+                try:
+                    ftps.quit()
+                except Exception:
+                    pass
+            return f"FTPS reachable (port {p})"
+        except Exception as e:
+            logger.warning("Connectivity probe failed on port %s: %s", p, e)
+            last = e
+            continue
+    try:
+        msg = f"FTPS not reachable: {last}"
+    except Exception:
+        msg = "FTPS not reachable"
+    return msg
+
+
 def upload_file(
     *,
     local_path: str | None = None,
