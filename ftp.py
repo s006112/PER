@@ -90,6 +90,16 @@ def upload_file(
         remote_name,
     )
 
+    # Optionally log the Space's public egress IP to aid firewall allowlisting
+    if os.getenv("FTP_LOG_PUBLIC_IP", "false").lower() in ("1", "true", "yes", "on"): 
+        try:
+            import urllib.request
+            with urllib.request.urlopen("https://api.ipify.org", timeout=5) as r:
+                ip = r.read().decode().strip()
+            logger.info("Public egress IP detected: %s", ip or "<empty>")
+        except Exception as e:
+            logger.info("Public egress IP detection failed: %s", e)
+
     attempts = [
         {"passive": True, "use_epsv": True},   # Try EPSV passive (often best behind NAT)
         {"passive": True, "use_epsv": False},  # Try PASV passive
