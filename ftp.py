@@ -5,6 +5,7 @@ import ssl
 import ftplib
 from ftplib import FTP_TLS
 import io
+import uuid
 
 
 LOGGER_NAME = "ftps_upload"
@@ -41,6 +42,76 @@ def _get_logger() -> logging.Logger:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     return logging.getLogger(LOGGER_NAME)
+
+
+def _upload_via_http(
+    *, url: str, payload: bytes, remote_name: str, logger: logging.Logger
+) -> None:
+    """Best-effort HTTPS relay upload using multipart/form-data.
+
+    Controlled by env-only to preserve existing FTP behavior by default:
+    - `FTP_HTTP_RELAY_URL`: full HTTPS URL to POST to.
+    - Optional `FTP_HTTP_RELAY_BEARER`: raw token used as `Authorization: Bearer <token>`.
+    - Optional `FTP_HTTP_RELAY_BASIC`: `user:pass` to send as HTTP Basic.
+    The relay should accept fields: `file` (binary) and `remote_name` (string).
+    """
+    import base64
+    import urllib.request
+    import urllib.error
+
+    boundary = f"----hfrelay-{uuid.uuid4().hex}"
+    crlf = "\r\n"
+    parts: list[bytes] = []
+
+    # file part
+    parts.append((f"--{boundary}" + crlf).encode())
+    parts.append(
+        (
+            "Content-Disposition: form-data; name=\"file\"; filename=\""
+            + remote_name
+            + "\""
+            + crlf
+        ).encode()
+    )
+    parts.append(("Content-Type: application/octet-stream" + crlf + crlf).encode())
+    parts.append(payload)
+    parts.append(crlf.encode())
+
+    # remote_name part
+    parts.append((f"--{boundary}" + crlf).encode())
+    parts.append(("Content-Disposition: form-data; name=\"remote_name\"" + crlf).encode())
+    parts.append((crlf).encode())
+    parts.append(remote_name.encode())
+    parts.append(crlf.encode())
+
+    parts.append((f"--{boundary}--" + crlf).encode())
+    body = b"".join(parts)
+
+    headers = {
+        "Content-Type": f"multipart/form-data; boundary={boundary}",
+        "Content-Length": str(len(body)),
+        "User-Agent": "hf-space-ftp-relay/1.0",
+    }
+
+    bearer = os.getenv("FTP_HTTP_RELAY_BEARER")
+    basic = os.getenv("FTP_HTTP_RELAY_BASIC")
+    if bearer:
+        headers["Authorization"] = f"Bearer {bearer}"
+    elif basic and ":" in basic:
+        headers["Authorization"] = "Basic " + base64.b64encode(basic.encode()).decode()
+
+    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    logger.info("HTTP relay POST %s (%d bytes)", url, len(body))
+    try:
+        with urllib.request.urlopen(req, timeout=int(os.getenv("FTP_HTTP_RELAY_TIMEOUT", "20"))) as resp:
+            code = resp.getcode()
+            logger.info("HTTP relay response: %s", code)
+            if code >= 400:
+                raise RuntimeError(f"HTTP relay failed with status {code}")
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"HTTP relay HTTPError: {e.code} {e.reason}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"HTTP relay URLError: {e.reason}") from e
 
 
 def upload_file(
@@ -99,6 +170,23 @@ def upload_file(
             logger.info("Public egress IP detected: %s", ip or "<empty>")
         except Exception as e:
             logger.info("Public egress IP detection failed: %s", e)
+
+    # Optional HTTPS relay path (port 443 compatible in Spaces). If provided, use it and return.
+    http_relay = os.getenv("FTP_HTTP_RELAY_URL")
+    if http_relay:
+        try:
+            payload: bytes
+            if data is not None:
+                payload = data
+            else:
+                with open(local_path, "rb") as f:
+                    payload = f.read()
+            logger.info("Using HTTP relay instead of FTP: %s", http_relay)
+            _upload_via_http(url=http_relay, payload=payload, remote_name=remote_name, logger=logger)
+            return
+        except Exception as e:
+            logger.warning("HTTP relay upload failed: %s", e)
+            # Fall through to FTP attempts for environments where it's allowed
 
     attempts = [
         {"passive": True, "use_epsv": True},   # Try EPSV passive (often best behind NAT)
