@@ -1,6 +1,5 @@
 import logging
 import os
-import sys
 import socket
 import ssl
 import ftplib
@@ -8,17 +7,6 @@ from ftplib import FTP_TLS
 
 
 LOGGER_NAME = "ftps_upload"
-
-
-def setup_logging() -> logging.Logger:
-    level = os.getenv("LOG_LEVEL", "INFO").upper()
-    logging.basicConfig(
-        level=getattr(logging, level, logging.INFO),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-    return logging.getLogger(LOGGER_NAME)
-
- 
 
 
 class ReuseFTPS(FTP_TLS):
@@ -45,15 +33,46 @@ class ReuseFTPS(FTP_TLS):
         return conn, size
 
 
-def upload_via_ftps(
-    host: str,
-    port: int,
-    username: str,
-    password: str,
-    local_path: str,
-    remote_filename: str,
-    logger: logging.Logger,
+def _get_logger() -> logging.Logger:
+    level = os.getenv("LOG_LEVEL", "INFO").upper()
+    logging.basicConfig(
+        level=getattr(logging, level, logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    return logging.getLogger(LOGGER_NAME)
+
+
+def upload_file(
+    *,
+    local_path: str | None = None,
+    remote_name: str | None = None,
+    host: str | None = None,
+    port: int | None = None,
+    username: str | None = None,
+    password: str | None = None,
+    logger: logging.Logger | None = None,
 ) -> None:
+    """Upload a file to the configured FTPS server.
+
+    Configuration and defaults mirror the previous CLI behavior exactly:
+    - `FTP_HOST` (default: "ftp.baltech-industry.com")
+    - `FTP_PORT` (default: 21)
+    - `FTP_USER`, `FTP_PASS`
+    - `FTP_LOCAL_PATH` (default: "dummy.png")
+    - `FTP_REMOTE_FILENAME` (default: basename of local path)
+
+    The remote destination path remains: /public_html/PER/CIE/{remote_name}
+    """
+    if logger is None:
+        logger = _get_logger()
+
+    host = host or os.getenv("FTP_HOST", "ftp.baltech-industry.com")
+    port = int(port if port is not None else os.getenv("FTP_PORT", "21"))
+    username = username or os.getenv("FTP_USER")
+    password = password or os.getenv("FTP_PASS")
+    local_path = local_path or os.getenv("FTP_LOCAL_PATH", "dummy.png")
+    remote_name = remote_name or os.getenv("FTP_REMOTE_FILENAME", os.path.basename(local_path))
+
     attempts = [
         {"passive": True, "use_epsv": True},   # Try EPSV passive (often best behind NAT)
         {"passive": True, "use_epsv": False},  # Try PASV passive
@@ -83,7 +102,7 @@ def upload_via_ftps(
             ftps.login(user=username, passwd=password)
             ftps.prot_p()
             with open(local_path, "rb") as f:
-                cmd = f"STOR /public_html/PER/CIE/{remote_filename}"
+                cmd = f"STOR /public_html/PER/CIE/{remote_name}"
                 ftps.storbinary(cmd, f)
             try:
                 ftps.quit()
@@ -100,35 +119,3 @@ def upload_via_ftps(
 
     # If we got here, all attempts failed
     raise last_err if last_err else RuntimeError("FTPS upload failed without specific error")
-
-
-def main() -> int:
-    logger = setup_logging()
-
-    host = os.getenv("FTP_HOST", "ftp.baltech-industry.com")
-    port = int(os.getenv("FTP_PORT", "21"))  # explicit FTPS default port
-    user = os.getenv("FTP_USER")
-    passwd = os.getenv("FTP_PASS")
-    local_path = os.getenv("FTP_LOCAL_PATH", "dummy.png")
-    remote_filename = os.getenv("FTP_REMOTE_FILENAME", os.path.basename(local_path))
-
-    # Perform upload
-    try:
-        upload_via_ftps(
-            host=host,
-            port=port,
-            username=user,
-            password=passwd,
-            local_path=local_path,
-            remote_filename=remote_filename,
-            logger=logger,
-        )
-    except Exception:
-        logger.error("Upload failed", exc_info=True)
-        return 1
-
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
