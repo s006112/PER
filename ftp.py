@@ -72,6 +72,7 @@ def upload_file(
     port = int(port if port is not None else os.getenv("FTP_PORT", "21"))
     username = username or os.getenv("FTP_USER")
     password = password or os.getenv("FTP_PASS")
+    timeout = int(os.getenv("FTP_CONNECT_TIMEOUT", "30"))
     local_path = local_path or os.getenv("FTP_LOCAL_PATH", "dummy.png")
     # If uploading from in-memory data, caller should pass remote_name explicitly or rely on env
     if remote_name is None:
@@ -92,21 +93,19 @@ def upload_file(
         use_epsv = opts["use_epsv"]
         mode = f"passive={'on' if passive else 'off'}, method={'EPSV' if use_epsv else 'PASV/PORT'}"
         logger.info("Attempt %d starting: %s", idx, mode)
-        logger.debug(
-            "Config: host=%s port=%s user=%s local_path=%s remote_name=%s data=%s",
-            host,
-            port,
-            bool(username),  # don't log actual username when DEBUG not needed
-            local_path,
-            remote_name,
-            "yes" if data is not None else "no",
-        )
         try:
             gai = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
-            addrs = [f"{ai[0].name}/{ai[4][0]}" for ai in gai[:5]]  # limit log size
-            logger.debug("getaddrinfo: %s", ", ".join(addrs) or "<none>")
+            addrs = []
+            for ai in gai[:6]:
+                fam = "AF_INET6" if ai[0] == socket.AF_INET6 else "AF_INET" if ai[0] == socket.AF_INET else str(ai[0])
+                try:
+                    ip = ai[4][0]
+                except Exception:
+                    ip = "<unknown>"
+                addrs.append(f"{fam}:{ip}")
+            logger.info("DNS resolved: %s", ", ".join(addrs) if addrs else "<none>")
         except Exception as _e:
-            logger.debug("getaddrinfo failed: %s", _e)
+            logger.info("DNS resolution failed: %s", _e)
         try:
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
             context.check_hostname = False
@@ -120,16 +119,37 @@ def upload_file(
             else:
                 ftps.af = socket.AF_INET
 
-            logger.debug("Set address family: %s", "AF_INET6" if ftps.af == socket.AF_INET6 else "AF_INET")
+            logger.info("Address family selected: %s", "AF_INET6" if ftps.af == socket.AF_INET6 else "AF_INET")
             ftps.set_pasv(passive)
-            logger.debug("PASV set to: %s", passive)
-            logger.info("Connecting to %s:%s with timeout=%s", host, port, 30)
-            ftps.connect(host=host, port=port, timeout=30)
+            logger.info("PASV set to: %s", passive)
+
+            # Quick connectivity probe (non-fatal), 3s timeout
+            try:
+                fam = ftps.af
+                s = socket.socket(fam, socket.SOCK_STREAM)
+                s.settimeout(float(os.getenv("FTP_PROBE_TIMEOUT", "3")))
+                logger.info("Connectivity probe to %s:%s (family=%s)", host, port, "AF_INET6" if fam == socket.AF_INET6 else "AF_INET")
+                s.connect((host, port))
+                try:
+                    peer = s.getpeername()
+                except Exception:
+                    peer = None
+                logger.info("Probe success: peer=%s", peer)
+            except Exception as pe:
+                logger.info("Probe failed: %s", pe)
+            finally:
+                try:
+                    s.close()
+                except Exception:
+                    pass
+
+            logger.info("Connecting to %s:%s with timeout=%s", host, port, timeout)
+            ftps.connect(host=host, port=port, timeout=timeout)
             logger.info("Connected. Logging in as %s", "<provided>" if username else "<anonymous>")
             ftps.login(user=username, passwd=password)
-            logger.debug("Login successful. Upgrading to PROT P")
+            logger.info("Login successful. Upgrading to PROT P")
             ftps.prot_p()
-            logger.debug("PROT P acknowledged. Preparing STOR command")
+            logger.info("PROT P acknowledged. Preparing STOR command")
             # Choose source: in-memory bytes or local file path
             if data is not None:
                 fobj = io.BytesIO(data)
