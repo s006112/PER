@@ -91,6 +91,22 @@ def upload_file(
         passive = opts["passive"]
         use_epsv = opts["use_epsv"]
         mode = f"passive={'on' if passive else 'off'}, method={'EPSV' if use_epsv else 'PASV/PORT'}"
+        logger.info("Attempt %d starting: %s", idx, mode)
+        logger.debug(
+            "Config: host=%s port=%s user=%s local_path=%s remote_name=%s data=%s",
+            host,
+            port,
+            bool(username),  # don't log actual username when DEBUG not needed
+            local_path,
+            remote_name,
+            "yes" if data is not None else "no",
+        )
+        try:
+            gai = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+            addrs = [f"{ai[0].name}/{ai[4][0]}" for ai in gai[:5]]  # limit log size
+            logger.debug("getaddrinfo: %s", ", ".join(addrs) or "<none>")
+        except Exception as _e:
+            logger.debug("getaddrinfo failed: %s", _e)
         try:
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
             context.check_hostname = False
@@ -104,19 +120,28 @@ def upload_file(
             else:
                 ftps.af = socket.AF_INET
 
+            logger.debug("Set address family: %s", "AF_INET6" if ftps.af == socket.AF_INET6 else "AF_INET")
             ftps.set_pasv(passive)
+            logger.debug("PASV set to: %s", passive)
+            logger.info("Connecting to %s:%s with timeout=%s", host, port, 30)
             ftps.connect(host=host, port=port, timeout=30)
+            logger.info("Connected. Logging in as %s", "<provided>" if username else "<anonymous>")
             ftps.login(user=username, passwd=password)
+            logger.debug("Login successful. Upgrading to PROT P")
             ftps.prot_p()
+            logger.debug("PROT P acknowledged. Preparing STOR command")
             # Choose source: in-memory bytes or local file path
             if data is not None:
                 fobj = io.BytesIO(data)
                 cmd = f"STOR /public_html/PER/CIE/{remote_name}"
+                logger.info("Uploading in-memory data to %s", cmd.split(" ", 1)[1])
                 ftps.storbinary(cmd, fobj)
             else:
                 with open(local_path, "rb") as f:
                     cmd = f"STOR /public_html/PER/CIE/{remote_name}"
+                    logger.info("Uploading file '%s' to %s", local_path, cmd.split(" ", 1)[1])
                     ftps.storbinary(cmd, f)
+            logger.info("STOR completed successfully")
             try:
                 ftps.quit()
             finally:
