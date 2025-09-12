@@ -309,18 +309,3 @@ def get_drawing_javascript() -> str:
   }})();
 }}
 """
-
-
-def upload_saved_plot(local_path: str) -> None:
-    """Upload the saved CIE PNG to FTP using existing configuration.
-
-    - local_path: path to the saved PNG (e.g., "CIE_YYYY-MM-DD_HH-MM-SS.png")
-    - remote name mirrors the basename of local_path
-
-    Any errors are logged and ignored to avoid altering flows.
-    """
-    try:
-        name = os.path.basename(local_path)
-        ftp.upload_file(local_path=local_path, remote_name=name)
-    except Exception as e:
-        logging.getLogger("ftps_upload").error("CIE FTP upload failed: %s", e)
