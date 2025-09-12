@@ -5,6 +5,7 @@ import ssl
 import ftplib
 from ftplib import FTP_TLS
 import io
+import httpx
 
 
 LOGGER_NAME = "ftps_upload"
@@ -91,6 +92,30 @@ def upload_file(
             remote_name = os.getenv("FTP_REMOTE_FILENAME", os.path.basename(local_path))
         else:
             remote_name = os.getenv("FTP_REMOTE_FILENAME", "upload.png")
+
+    # Optional HTTPS fallback for environments that block FTPS (e.g., PaaS).
+    http_upload_url = os.getenv("FTP_HTTP_UPLOAD_URL")
+    if http_upload_url:
+        try:
+            content = data
+            if content is None:
+                with open(local_path, "rb") as f:
+                    content = f.read()
+            headers = {}
+            token = os.getenv("FTP_HTTP_UPLOAD_TOKEN")
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+            with httpx.Client(timeout=int(os.getenv("FTP_CONNECT_TIMEOUT", "30"))) as client:
+                r = client.post(
+                    http_upload_url,
+                    data={"remote_name": remote_name},
+                    files={"file": (remote_name, content, "image/png")},
+                    headers=headers,
+                )
+                r.raise_for_status()
+            return
+        except Exception as e:
+            logger.warning("HTTPS upload fallback failed: %s; continuing with FTPS", e)
 
     attempts = [
         {"passive": True, "use_epsv": False},  # Prefer PASV over IPv4 for PaaS compatibility
