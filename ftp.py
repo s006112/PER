@@ -5,6 +5,11 @@ import ssl
 import ftplib
 from ftplib import FTP_TLS
 import io
+import urllib.request
+import urllib.error
+import mimetypes
+import random
+import string
 
 
 LOGGER_NAME = "ftps_upload"
@@ -54,6 +59,48 @@ def _resolve_ipv4(host: str, port: int) -> str:
     return host
 
 
+def _http_upload(remote_name: str, content: bytes, *, url: str, token: str | None, timeout: int) -> None:
+    """Minimal dependency-free HTTPS multipart upload.
+
+    Sends fields: remote_name (text) and file (binary) as multipart/form-data.
+    Optional Authorization: Bearer <token> header if provided.
+    """
+    boundary = "----WebKitFormBoundary" + "".join(random.choices(string.ascii_letters + string.digits, k=16))
+    lines: list[bytes] = []
+
+    def add_field(name: str, value: str) -> None:
+        lines.extend([
+            f"--{boundary}\r\n".encode(),
+            f"Content-Disposition: form-data; name=\"{name}\"\r\n\r\n".encode(),
+            value.encode(), b"\r\n",
+        ])
+
+    def add_file(name: str, filename: str, data: bytes, content_type: str | None = None) -> None:
+        ctype = content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        lines.extend([
+            f"--{boundary}\r\n".encode(),
+            f"Content-Disposition: form-data; name=\"{name}\"; filename=\"{filename}\"\r\n".encode(),
+            f"Content-Type: {ctype}\r\n\r\n".encode(),
+            data, b"\r\n",
+        ])
+
+    add_field("remote_name", remote_name)
+    add_file("file", remote_name, content, "image/png")
+    lines.append(f"--{boundary}--\r\n".encode())
+    body = b"".join(lines)
+
+    req = urllib.request.Request(url, data=body, method="POST")
+    req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+    req.add_header("Content-Length", str(len(body)))
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        status = getattr(resp, 'status', 200)
+        if status < 200 or status >= 300:
+            raise urllib.error.HTTPError(url, status, "Upload failed", resp.headers, None)
+
+
 def upload_file(
     *,
     local_path: str | None = None,
@@ -91,14 +138,31 @@ def upload_file(
         else:
             remote_name = os.getenv("FTP_REMOTE_FILENAME", "upload.png")
 
+    # If HTTPS fallback URL is provided, prefer it on Spaces (or always if set)
+    http_url = os.getenv("FTP_HTTP_UPLOAD_URL")
+    http_token = os.getenv("FTP_HTTP_UPLOAD_TOKEN")
+    http_timeout = int(os.getenv("FTP_CONNECT_TIMEOUT", "8" if os.getenv("SPACE_ID") else "30"))
+
+    content_bytes: bytes | None = None
+    if http_url:
+        try:
+            if data is not None:
+                content_bytes = data
+            else:
+                with open(local_path, "rb") as f:
+                    content_bytes = f.read()
+            _http_upload(remote_name, content_bytes, url=http_url, token=http_token, timeout=http_timeout)
+            return
+        except Exception as e:
+            logger.warning("HTTPS upload failed: %s; falling back to FTPS", e)
+
     # Reorder attempts for PaaS (IPv4 PASV first); reduce retries on Spaces
     in_spaces = bool(os.getenv("SPACE_ID"))
     attempts = [
-        {"passive": True, "use_epsv": False},  # PASV over IPv4
-        {"passive": True, "use_epsv": True},   # EPSV
+        {"passive": True},  # PASV over IPv4
     ]
     if not in_spaces:
-        attempts.append({"passive": False, "use_epsv": False})  # Active only off-PaaS
+        attempts.append({"passive": False})  # Active only off-PaaS
 
     # Try configured port; extend with optional alternates and 990 on Spaces
     port_list = [port]
@@ -119,7 +183,6 @@ def upload_file(
         for opts in attempts:
             attempt_no += 1
             passive = opts["passive"]
-            use_epsv = opts["use_epsv"]
             try:
                 # Shorter default timeout on Spaces
                 timeout = int(os.getenv("FTP_CONNECT_TIMEOUT", "8" if in_spaces else "30"))
@@ -160,8 +223,8 @@ def upload_file(
             except Exception as e:
                 last_err = e
                 logger.warning(
-                    "Attempt %d failed (port=%s, passive=%s, epsv=%s): %s",
-                    attempt_no, port_try, passive, use_epsv, e,
+                    "Attempt %d failed (port=%s, passive=%s): %s",
+                    attempt_no, port_try, passive, e,
                 )
                 continue
 
