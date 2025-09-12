@@ -5,11 +5,6 @@ import ssl
 import ftplib
 from ftplib import FTP_TLS
 import io
-import urllib.request
-import urllib.error
-import mimetypes
-import random
-import string
 
 
 LOGGER_NAME = "ftps_upload"
@@ -46,133 +41,6 @@ def _get_logger() -> logging.Logger:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     return logging.getLogger(LOGGER_NAME)
-
-
-def _resolve_ipv4(host: str, port: int) -> str:
-    """Resolve to an IPv4 address to avoid IPv6 stalls on some PaaS."""
-    try:
-        infos = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
-        if infos:
-            return infos[0][4][0]
-    except Exception:
-        pass
-    return host
-
-
-def _http_upload(remote_name: str, content: bytes, *, url: str, token: str | None, timeout: int) -> None:
-    """Minimal dependency-free HTTPS multipart upload.
-
-    Sends fields: remote_name (text) and file (binary) as multipart/form-data.
-    Optional Authorization: Bearer <token> header if provided.
-    """
-    boundary = "----WebKitFormBoundary" + "".join(random.choices(string.ascii_letters + string.digits, k=16))
-    lines: list[bytes] = []
-
-    def add_field(name: str, value: str) -> None:
-        lines.extend([
-            f"--{boundary}\r\n".encode(),
-            f"Content-Disposition: form-data; name=\"{name}\"\r\n\r\n".encode(),
-            value.encode(), b"\r\n",
-        ])
-
-    def add_file(name: str, filename: str, data: bytes, content_type: str | None = None) -> None:
-        ctype = content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream"
-        lines.extend([
-            f"--{boundary}\r\n".encode(),
-            f"Content-Disposition: form-data; name=\"{name}\"; filename=\"{filename}\"\r\n".encode(),
-            f"Content-Type: {ctype}\r\n\r\n".encode(),
-            data, b"\r\n",
-        ])
-
-    add_field("remote_name", remote_name)
-    add_file("file", remote_name, content, "image/png")
-    lines.append(f"--{boundary}--\r\n".encode())
-    body = b"".join(lines)
-
-    req = urllib.request.Request(url, data=body, method="POST")
-    req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
-    req.add_header("Content-Length", str(len(body)))
-    if token:
-        req.add_header("Authorization", f"Bearer {token}")
-
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        status = getattr(resp, 'status', 200)
-        if status < 200 or status >= 300:
-            raise urllib.error.HTTPError(url, status, "Upload failed", resp.headers, None)
-
-
-def check_connectivity(logger: logging.Logger | None = None) -> str:
-    """Quick connectivity probe.
-
-    - If FTP_HTTP_UPLOAD_URL is set, performs a lightweight GET request.
-    - Otherwise, attempts FTPS control connection + NOOP using current config
-      with the same IPv4 + port selection logic and short timeouts on Spaces.
-    Returns a concise status string.
-    """
-    if logger is None:
-        logger = _get_logger()
-
-    http_url = os.getenv("FTP_HTTP_UPLOAD_URL")
-    http_timeout = int(os.getenv("FTP_CONNECT_TIMEOUT", "8" if os.getenv("SPACE_ID") else "30"))
-    if http_url:
-        try:
-            # Allow GET/HEAD; some endpoints may not support HEAD, so use GET with a probe param
-            probe = http_url + ("&" if "?" in http_url else "?") + "probe=1"
-            req = urllib.request.Request(probe, method="GET")
-            with urllib.request.urlopen(req, timeout=http_timeout) as resp:
-                status = getattr(resp, 'status', 200)
-                return f"HTTPS reachable (status {status})"
-        except Exception as e:
-            return f"HTTPS not reachable: {e}"
-
-    host = os.getenv("FTP_HOST", "ftp.baltech-industry.com")
-    port_cfg = int(os.getenv("FTP_PORT", "21"))
-    in_spaces = bool(os.getenv("SPACE_ID"))
-    timeout = int(os.getenv("FTP_CONNECT_TIMEOUT", "8" if in_spaces else "30"))
-
-    # Port list logic mirrors upload_file
-    port_list = [port_cfg]
-    alt = os.getenv("FTP_ALT_PORTS", "").strip()
-    if alt:
-        for p in alt.split(','):
-            p = p.strip()
-            if p.isdigit():
-                iv = int(p)
-                if iv not in port_list:
-                    port_list.append(iv)
-    if in_spaces and 990 not in port_list:
-        port_list.append(990)
-
-    for p in port_list:
-        try:
-            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            ftps = ReuseFTPS(context=ctx)
-            ftps.set_debuglevel(1)
-            ftps.af = socket.AF_INET  # IPv4
-            connect_host = _resolve_ipv4(host, p)
-            ftps.connect(host=connect_host, port=p, timeout=timeout)
-            user = os.getenv("FTP_USER"); pw = os.getenv("FTP_PASS")
-            ftps.login(user=user, passwd=pw)
-            ftps.prot_p()
-            try:
-                ftps.voidcmd('NOOP')
-            finally:
-                try:
-                    ftps.quit()
-                except Exception:
-                    pass
-            return f"FTPS reachable (port {p})"
-        except Exception as e:
-            logger.warning("Connectivity probe failed on port %s: %s", p, e)
-            last = e
-            continue
-    try:
-        msg = f"FTPS not reachable: {last}"
-    except Exception:
-        msg = "FTPS not reachable"
-    return msg
 
 
 def upload_file(
@@ -212,95 +80,55 @@ def upload_file(
         else:
             remote_name = os.getenv("FTP_REMOTE_FILENAME", "upload.png")
 
-    # If HTTPS fallback URL is provided, prefer it on Spaces (or always if set)
-    http_url = os.getenv("FTP_HTTP_UPLOAD_URL")
-    http_token = os.getenv("FTP_HTTP_UPLOAD_TOKEN")
-    http_timeout = int(os.getenv("FTP_CONNECT_TIMEOUT", "8" if os.getenv("SPACE_ID") else "30"))
-
-    content_bytes: bytes | None = None
-    if http_url:
-        try:
-            if data is not None:
-                content_bytes = data
-            else:
-                with open(local_path, "rb") as f:
-                    content_bytes = f.read()
-            _http_upload(remote_name, content_bytes, url=http_url, token=http_token, timeout=http_timeout)
-            return
-        except Exception as e:
-            logger.warning("HTTPS upload failed: %s; falling back to FTPS", e)
-
-    # Reorder attempts for PaaS (IPv4 PASV first); reduce retries on Spaces
-    in_spaces = bool(os.getenv("SPACE_ID"))
     attempts = [
-        {"passive": True},  # PASV over IPv4
+        {"passive": True, "use_epsv": True},   # Try EPSV passive (often best behind NAT)
+        {"passive": True, "use_epsv": False},  # Try PASV passive
+        {"passive": False, "use_epsv": False}, # Try active (PORT)
     ]
-    if not in_spaces:
-        attempts.append({"passive": False})  # Active only off-PaaS
-
-    # Try configured port; extend with optional alternates and 990 on Spaces
-    port_list = [port]
-    alt = os.getenv("FTP_ALT_PORTS", "").strip()
-    if alt:
-        for p in alt.split(','):
-            p = p.strip()
-            if p.isdigit():
-                iv = int(p)
-                if iv not in port_list:
-                    port_list.append(iv)
-    if in_spaces and 990 not in port_list:
-        port_list.append(990)
 
     last_err = None
-    attempt_no = 0
-    for port_try in port_list:
-        for opts in attempts:
-            attempt_no += 1
-            passive = opts["passive"]
-            try:
-                # Shorter default timeout on Spaces
-                timeout = int(os.getenv("FTP_CONNECT_TIMEOUT", "8" if in_spaces else "30"))
+    for idx, opts in enumerate(attempts, start=1):
+        passive = opts["passive"]
+        use_epsv = opts["use_epsv"]
+        mode = f"passive={'on' if passive else 'off'}, method={'EPSV' if use_epsv else 'PASV/PORT'}"
+        try:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
 
-                context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-                context.check_hostname = False
-                context.verify_mode = ssl.CERT_NONE
+            ftps = ReuseFTPS(context=context)
+            ftps.set_debuglevel(1)
 
-                ftps = ReuseFTPS(context=context)
-                ftps.set_debuglevel(1)
-
-                # Force IPv4 for data connections
+            if use_epsv:
+                ftps.af = socket.AF_INET6
+            else:
                 ftps.af = socket.AF_INET
 
-                ftps.set_pasv(passive)
-                # Resolve control connection to IPv4 literal to avoid AAAA routes
-                connect_host = _resolve_ipv4(host, port_try)
-                ftps.connect(host=connect_host, port=port_try, timeout=timeout)
-                ftps.login(user=username, passwd=password)
-                ftps.prot_p()
-                # Choose source: in-memory bytes or local file path
-                if data is not None:
-                    fobj = io.BytesIO(data)
+            ftps.set_pasv(passive)
+            ftps.connect(host=host, port=port, timeout=30)
+            ftps.login(user=username, passwd=password)
+            ftps.prot_p()
+            # Choose source: in-memory bytes or local file path
+            if data is not None:
+                fobj = io.BytesIO(data)
+                cmd = f"STOR /public_html/PER/CIE/{remote_name}"
+                ftps.storbinary(cmd, fobj)
+            else:
+                with open(local_path, "rb") as f:
                     cmd = f"STOR /public_html/PER/CIE/{remote_name}"
-                    ftps.storbinary(cmd, fobj)
-                else:
-                    with open(local_path, "rb") as f:
-                        cmd = f"STOR /public_html/PER/CIE/{remote_name}"
-                        ftps.storbinary(cmd, f)
+                    ftps.storbinary(cmd, f)
+            try:
+                ftps.quit()
+            finally:
                 try:
-                    ftps.quit()
-                finally:
-                    try:
-                        ftps.close()
-                    except Exception:
-                        pass
-                return
-            except Exception as e:
-                last_err = e
-                logger.warning(
-                    "Attempt %d failed (port=%s, passive=%s): %s",
-                    attempt_no, port_try, passive, e,
-                )
-                continue
+                    ftps.close()
+                except Exception:
+                    pass
+            return
+        except Exception as e:
+            last_err = e
+            logger.warning("Attempt %d failed: %s", idx, e)
+            continue
 
     # If we got here, all attempts failed
     raise last_err if last_err else RuntimeError("FTPS upload failed without specific error")

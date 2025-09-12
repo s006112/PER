@@ -241,7 +241,6 @@ with gr.Blocks(title="Photometric extraction") as demo:
     with gr.Row():
         inp = gr.File(label="Upload PDF File", file_types=[".pdf"], type="filepath")
     btn = gr.Button("Submit")
-    test_btn = gr.Button("Test Upload Connectivity")
 
     combined_summary_box = gr.Textbox(label="Summary", lines=14, show_copy_button=True)
 
@@ -281,7 +280,6 @@ with gr.Blocks(title="Photometric extraction") as demo:
     # Wire outputs: summary (visible), dataframe + original text (hidden but functional)
     btn.click(handle_upload, inputs=inp, outputs=[combined_summary_box, cct_xy_box, original_text_box])
     cie_png_upload_box.change(handle_cie_png_upload, inputs=cie_png_upload_box, outputs=[cie_upload_status])
-    test_btn.click(lambda: ftp.check_connectivity(), inputs=[], outputs=cie_upload_status)
 
     # Load JS for CIE canvas drawing
     demo.load(fn=lambda: None, inputs=[], outputs=[], js=get_drawing_javascript())
