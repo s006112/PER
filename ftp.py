@@ -43,6 +43,17 @@ def _get_logger() -> logging.Logger:
     return logging.getLogger(LOGGER_NAME)
 
 
+def _resolve_ipv4(host: str, port: int) -> str:
+    """Resolve to an IPv4 address to avoid IPv6 stalls on some PaaS."""
+    try:
+        infos = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
+        if infos:
+            return infos[0][4][0]
+    except Exception:
+        pass
+    return host
+
+
 def upload_file(
     *,
     local_path: str | None = None,
@@ -80,55 +91,79 @@ def upload_file(
         else:
             remote_name = os.getenv("FTP_REMOTE_FILENAME", "upload.png")
 
+    # Reorder attempts for PaaS (IPv4 PASV first); reduce retries on Spaces
+    in_spaces = bool(os.getenv("SPACE_ID"))
     attempts = [
-        {"passive": True, "use_epsv": True},   # Try EPSV passive (often best behind NAT)
-        {"passive": True, "use_epsv": False},  # Try PASV passive
-        {"passive": False, "use_epsv": False}, # Try active (PORT)
+        {"passive": True, "use_epsv": False},  # PASV over IPv4
+        {"passive": True, "use_epsv": True},   # EPSV
     ]
+    if not in_spaces:
+        attempts.append({"passive": False, "use_epsv": False})  # Active only off-PaaS
+
+    # Try configured port; extend with optional alternates and 990 on Spaces
+    port_list = [port]
+    alt = os.getenv("FTP_ALT_PORTS", "").strip()
+    if alt:
+        for p in alt.split(','):
+            p = p.strip()
+            if p.isdigit():
+                iv = int(p)
+                if iv not in port_list:
+                    port_list.append(iv)
+    if in_spaces and 990 not in port_list:
+        port_list.append(990)
 
     last_err = None
-    for idx, opts in enumerate(attempts, start=1):
-        passive = opts["passive"]
-        use_epsv = opts["use_epsv"]
-        mode = f"passive={'on' if passive else 'off'}, method={'EPSV' if use_epsv else 'PASV/PORT'}"
-        try:
-            context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-            context.check_hostname = False
-            context.verify_mode = ssl.CERT_NONE
+    attempt_no = 0
+    for port_try in port_list:
+        for opts in attempts:
+            attempt_no += 1
+            passive = opts["passive"]
+            use_epsv = opts["use_epsv"]
+            try:
+                # Shorter default timeout on Spaces
+                timeout = int(os.getenv("FTP_CONNECT_TIMEOUT", "8" if in_spaces else "30"))
 
-            ftps = ReuseFTPS(context=context)
-            ftps.set_debuglevel(1)
+                context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                context.check_hostname = False
+                context.verify_mode = ssl.CERT_NONE
 
-            if use_epsv:
-                ftps.af = socket.AF_INET6
-            else:
+                ftps = ReuseFTPS(context=context)
+                ftps.set_debuglevel(1)
+
+                # Force IPv4 for data connections
                 ftps.af = socket.AF_INET
 
-            ftps.set_pasv(passive)
-            ftps.connect(host=host, port=port, timeout=30)
-            ftps.login(user=username, passwd=password)
-            ftps.prot_p()
-            # Choose source: in-memory bytes or local file path
-            if data is not None:
-                fobj = io.BytesIO(data)
-                cmd = f"STOR /public_html/PER/CIE/{remote_name}"
-                ftps.storbinary(cmd, fobj)
-            else:
-                with open(local_path, "rb") as f:
+                ftps.set_pasv(passive)
+                # Resolve control connection to IPv4 literal to avoid AAAA routes
+                connect_host = _resolve_ipv4(host, port_try)
+                ftps.connect(host=connect_host, port=port_try, timeout=timeout)
+                ftps.login(user=username, passwd=password)
+                ftps.prot_p()
+                # Choose source: in-memory bytes or local file path
+                if data is not None:
+                    fobj = io.BytesIO(data)
                     cmd = f"STOR /public_html/PER/CIE/{remote_name}"
-                    ftps.storbinary(cmd, f)
-            try:
-                ftps.quit()
-            finally:
+                    ftps.storbinary(cmd, fobj)
+                else:
+                    with open(local_path, "rb") as f:
+                        cmd = f"STOR /public_html/PER/CIE/{remote_name}"
+                        ftps.storbinary(cmd, f)
                 try:
-                    ftps.close()
-                except Exception:
-                    pass
-            return
-        except Exception as e:
-            last_err = e
-            logger.warning("Attempt %d failed: %s", idx, e)
-            continue
+                    ftps.quit()
+                finally:
+                    try:
+                        ftps.close()
+                    except Exception:
+                        pass
+                return
+            except Exception as e:
+                last_err = e
+                logger.warning(
+                    "Attempt %d failed (port=%s, passive=%s, epsv=%s): %s",
+                    attempt_no, port_try, passive, use_epsv, e,
+                )
+                continue
 
     # If we got here, all attempts failed
     raise last_err if last_err else RuntimeError("FTPS upload failed without specific error")
