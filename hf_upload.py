@@ -4,6 +4,7 @@ import os
 import socket
 import ssl
 from typing import Optional
+from datetime import datetime, timezone
 
 
 def _get_logger() -> logging.Logger:
@@ -98,6 +99,25 @@ def _fallback_upload_bytes(
     raise last_err if last_err else RuntimeError("FTPS upload failed without specific error")
 
 
+def _timestamped_remote_name(base: Optional[str]) -> str:
+    base_name = base or os.getenv("FTP_REMOTE_FILENAME", "upload.png")
+    # Preserve optional subdirectory components in the provided base name
+    if "/" in base_name:
+        dir_part, file_part = base_name.rsplit("/", 1)
+    else:
+        dir_part, file_part = "", base_name
+
+    if "." in file_part:
+        stem, ext = file_part.rsplit(".", 1)
+        ext = "." + ext
+    else:
+        stem, ext = file_part, ".png"
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    stamped = f"{stem}_{ts}{ext}"
+    return f"{dir_part}/{stamped}" if dir_part else stamped
+
+
 def main() -> None:
     logger = _get_logger()
     png = _png_bytes()
@@ -107,14 +127,17 @@ def main() -> None:
     except Exception:
         ftp_module = None
 
+    # Build timestamped remote filename using the configured base name
+    base = os.getenv("FTP_REMOTE_FILENAME")
+    remote_name = _timestamped_remote_name(base)
+
     if ftp_module and hasattr(ftp_module, "upload_file"):
-        ftp_module.upload_file(data=png, logger=logger)
+        ftp_module.upload_file(data=png, remote_name=remote_name, logger=logger)
         logger.info("Upload completed via ftp.upload_file")
     else:
-        _fallback_upload_bytes(png, logger=logger)
+        _fallback_upload_bytes(png, remote_name=remote_name, logger=logger)
         logger.info("Upload completed via internal FTPS fallback")
 
 
 if __name__ == "__main__":
     main()
-
