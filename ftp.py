@@ -5,7 +5,6 @@ import ssl
 import ftplib
 from ftplib import FTP_TLS
 import io
-import httpx
 
 
 LOGGER_NAME = "ftps_upload"
@@ -42,18 +41,6 @@ def _get_logger() -> logging.Logger:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     return logging.getLogger(LOGGER_NAME)
-
-
-def _resolve_host(host: str, port: int, force_ipv4: bool) -> str:
-    """Optionally resolve to IPv4 literal to avoid IPv6 timeouts on some hosts."""
-    if force_ipv4:
-        try:
-            infos = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
-            if infos:
-                return infos[0][4][0]
-        except Exception:
-            pass
-    return host
 
 
 def upload_file(
@@ -93,34 +80,10 @@ def upload_file(
         else:
             remote_name = os.getenv("FTP_REMOTE_FILENAME", "upload.png")
 
-    # Optional HTTPS fallback for environments that block FTPS (e.g., PaaS).
-    http_upload_url = os.getenv("FTP_HTTP_UPLOAD_URL")
-    if http_upload_url:
-        try:
-            content = data
-            if content is None:
-                with open(local_path, "rb") as f:
-                    content = f.read()
-            headers = {}
-            token = os.getenv("FTP_HTTP_UPLOAD_TOKEN")
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
-            with httpx.Client(timeout=int(os.getenv("FTP_CONNECT_TIMEOUT", "30"))) as client:
-                r = client.post(
-                    http_upload_url,
-                    data={"remote_name": remote_name},
-                    files={"file": (remote_name, content, "image/png")},
-                    headers=headers,
-                )
-                r.raise_for_status()
-            return
-        except Exception as e:
-            logger.warning("HTTPS upload fallback failed: %s; continuing with FTPS", e)
-
     attempts = [
-        {"passive": True, "use_epsv": False},  # Prefer PASV over IPv4 for PaaS compatibility
-        {"passive": True, "use_epsv": False},  # Retry PASV once more
-        {"passive": False, "use_epsv": False}, # Fallback to active (may fail on PaaS)
+        {"passive": True, "use_epsv": True},   # Try EPSV passive (often best behind NAT)
+        {"passive": True, "use_epsv": False},  # Try PASV passive
+        {"passive": False, "use_epsv": False}, # Try active (PORT)
     ]
 
     last_err = None
@@ -129,11 +92,6 @@ def upload_file(
         use_epsv = opts["use_epsv"]
         mode = f"passive={'on' if passive else 'off'}, method={'EPSV' if use_epsv else 'PASV/PORT'}"
         try:
-            # Connection settings
-            force_ipv4 = os.getenv("FTP_FORCE_IPV4", "1").lower() not in ("0", "false", "no")
-            timeout = int(os.getenv("FTP_CONNECT_TIMEOUT", "30"))
-            connect_host = _resolve_host(host, port, force_ipv4)
-
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
@@ -141,11 +99,13 @@ def upload_file(
             ftps = ReuseFTPS(context=context)
             ftps.set_debuglevel(1)
 
-            # Force IPv4 for data connections to avoid IPv6-only EPSV paths
-            ftps.af = socket.AF_INET
+            if use_epsv:
+                ftps.af = socket.AF_INET6
+            else:
+                ftps.af = socket.AF_INET
 
             ftps.set_pasv(passive)
-            ftps.connect(host=connect_host, port=port, timeout=timeout)
+            ftps.connect(host=host, port=port, timeout=30)
             ftps.login(user=username, passwd=password)
             ftps.prot_p()
             # Choose source: in-memory bytes or local file path
