@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import os
 import re
+import json
+import base64
+import io
 from typing import Tuple, List
 from dotenv import load_dotenv
 from pathlib import Path
@@ -11,6 +14,10 @@ from cie1931 import get_canvas_html, get_drawing_javascript
 
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# PNG upload target (aligns with upload_test.py behavior)
+PNG_UPLOAD_URL = os.getenv("PNG_UPLOAD_URL", "https://baltech-industry.com/upload.php")
+PNG_UPLOAD_FIELD = os.getenv("PNG_UPLOAD_FIELD", "file")
 
 # ----------------------------
 # PDF parsing
@@ -199,8 +206,36 @@ def handle_upload(file_path: str) -> Tuple[str, List[List[float | str]], str]:
 
     return combined_summary, cct_xy, text
 
+# ----------------------------
+# CIE PNG upload bridge (DataURL -> remote upload)
+# ----------------------------
+def _post_png_bytes(filename: str, data: bytes) -> None:
+    """Upload PNG bytes to remote host per upload_test.py algorithm."""
+    try:
+        import requests
+        files = {PNG_UPLOAD_FIELD: (filename, io.BytesIO(data), "image/png")}
+        requests.post(PNG_UPLOAD_URL, files=files, timeout=30)
+    except Exception:
+        # Best-effort; keep UI responsive and silent on failures
+        pass
 
-# (Removed) CIE PNG upload bridge and FTP logic
+
+def upload_cie_png(payload: str) -> None:
+    """Gradio change-callback: receive JSON {filename, data_url} and upload PNG."""
+    try:
+        if not payload:
+            return None
+        obj = json.loads(payload)
+        fname = (obj.get("filename") or "cie.png").strip() or "cie.png"
+        data_url = obj.get("data_url") or ""
+        if not data_url.startswith("data:image/png;base64,"):
+            return None
+        b64 = data_url.split(",", 1)[1]
+        png_bytes = base64.b64decode(b64)
+        _post_png_bytes(fname, png_bytes)
+    except Exception:
+        # Silent best-effort
+        return None
 
 # ----------------------------
 # UI
@@ -216,7 +251,7 @@ with gr.Blocks(title="Photometric extraction") as demo:
     # CIE chart
     gr.HTML(get_canvas_html(), elem_id="cie_box")
 
-    # Hidden (but present in DOM): original text and parsed CIE x,y table
+    # Hidden (but present in DOM): original text, parsed CIE x,y table, and CIE PNG upload bridge
     # Keep DOM so the JS can read values for plotting.
     original_text_box = gr.Textbox(
         label="Sphere PDF extraction",
@@ -232,11 +267,19 @@ with gr.Blocks(title="Photometric extraction") as demo:
         elem_id="cct_xy_df",
     )
 
+    # Hidden textbox used by JS to signal a PNG data URL to backend for upload
+    cie_png_upload_box = gr.Textbox(
+        label="CIE PNG upload payload",
+        lines=1,
+        elem_id="cie_png_upload",
+    )
+
     gr.HTML(
         """
         <style>
           #cct_xy_df { display: none !important; }
           #original_text_box { display: none !important; }
+          #cie_png_upload { display: none !important; }
         </style>
         """
     )
@@ -246,6 +289,9 @@ with gr.Blocks(title="Photometric extraction") as demo:
 
     # Load JS for CIE canvas drawing
     demo.load(fn=lambda: None, inputs=[], outputs=[], js=get_drawing_javascript())
+
+    # Wire hidden upload bridge: when JS writes JSON into the hidden textbox, upload PNG
+    cie_png_upload_box.change(upload_cie_png, inputs=[cie_png_upload_box], outputs=[])
 
 if __name__ == "__main__":
     demo.launch(server_name="0.0.0.0", server_port=7860)

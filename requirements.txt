@@ -2,3 +2,4 @@ gradio==4.44.0
 PyMuPDF==1.24.10
 dotenv==0.9.9
 openai==1.101.0
+requests>=2.31.0
