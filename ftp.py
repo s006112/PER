@@ -49,36 +49,25 @@ def _upload_via_http(
 ) -> None:
     """Best-effort HTTPS relay upload using multipart/form-data.
 
-    Environment variables:
-    - `FTP_HTTP_RELAY_URL`: full HTTPS URL to POST to (enables relay).
-    - `FTP_HTTP_FIELD`: form field name for the uploaded file (default: "file").
-    - `FTP_HTTP_EXTRA_JSON`: JSON object with extra form fields to append.
-    - `FTP_HTTP_RELAY_BEARER`: token for `Authorization: Bearer <token>`.
-    - `FTP_HTTP_RELAY_BASIC`: `user:pass` for HTTP Basic Authorization.
-    - `FTP_HTTP_RELAY_TIMEOUT`: request timeout in seconds (default: 60).
-
-    Always includes `remote_name` as a text field. Accepts any 2xx response
-    as success, logs status and first 200 chars of the body; otherwise raises.
+    Controlled by env-only to preserve existing FTP behavior by default:
+    - `FTP_HTTP_RELAY_URL`: full HTTPS URL to POST to.
+    - Optional `FTP_HTTP_RELAY_BEARER`: raw token used as `Authorization: Bearer <token>`.
+    - Optional `FTP_HTTP_RELAY_BASIC`: `user:pass` to send as HTTP Basic.
+    The relay should accept fields: `file` (binary) and `remote_name` (string).
     """
     import base64
     import urllib.request
     import urllib.error
-    import json
 
     boundary = f"----hfrelay-{uuid.uuid4().hex}"
     crlf = "\r\n"
     parts: list[bytes] = []
 
-    # Choose file field name (default: "file")
-    file_field = os.getenv("FTP_HTTP_FIELD", "file")
-
     # file part
     parts.append((f"--{boundary}" + crlf).encode())
     parts.append(
         (
-            "Content-Disposition: form-data; name=\""
-            + file_field
-            + "\"; filename=\""
+            "Content-Disposition: form-data; name=\"file\"; filename=\""
             + remote_name
             + "\""
             + crlf
@@ -94,30 +83,6 @@ def _upload_via_http(
     parts.append((crlf).encode())
     parts.append(remote_name.encode())
     parts.append(crlf.encode())
-
-    # extra fields from JSON, if provided
-    extra_json = os.getenv("FTP_HTTP_EXTRA_JSON")
-    if extra_json:
-        try:
-            extra = json.loads(extra_json)
-            if isinstance(extra, dict):
-                for k, v in extra.items():
-                    # Convert value to a string representation
-                    if v is None:
-                        val = ""
-                    elif isinstance(v, bool):
-                        val = "true" if v else "false"
-                    else:
-                        val = str(v)
-                    parts.append((f"--{boundary}" + crlf).encode())
-                    parts.append((f"Content-Disposition: form-data; name=\"{k}\"" + crlf).encode())
-                    parts.append((crlf).encode())
-                    parts.append(val.encode())
-                    parts.append(crlf.encode())
-            else:
-                logger.warning("FTP_HTTP_EXTRA_JSON is not a JSON object; ignoring.")
-        except Exception as e:
-            logger.warning("Failed to parse FTP_HTTP_EXTRA_JSON: %s", e)
 
     parts.append((f"--{boundary}--" + crlf).encode())
     body = b"".join(parts)
@@ -138,26 +103,13 @@ def _upload_via_http(
     req = urllib.request.Request(url, data=body, headers=headers, method="POST")
     logger.info("HTTP relay POST %s (%d bytes)", url, len(body))
     try:
-        timeout_s = int(os.getenv("FTP_HTTP_RELAY_TIMEOUT", "60"))
-        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+        with urllib.request.urlopen(req, timeout=int(os.getenv("FTP_HTTP_RELAY_TIMEOUT", "20"))) as resp:
             code = resp.getcode()
-            raw = resp.read() or b""
-            try:
-                text = raw.decode("utf-8", errors="replace")
-            except Exception:
-                text = ""
-            snippet = text[:200]
-            logger.info("HTTP relay response: %s; body: %s", code, snippet)
-            if not (200 <= (code or 0) < 300):
-                raise RuntimeError(f"HTTP relay failed: {code} {snippet}")
+            logger.info("HTTP relay response: %s", code)
+            if code >= 400:
+                raise RuntimeError(f"HTTP relay failed with status {code}")
     except urllib.error.HTTPError as e:
-        try:
-            raw = e.read() or b""
-            text = raw.decode("utf-8", errors="replace")
-        except Exception:
-            text = e.reason or ""
-        snippet = text[:200]
-        raise RuntimeError(f"HTTP relay failed: {e.code} {snippet}") from e
+        raise RuntimeError(f"HTTP relay HTTPError: {e.code} {e.reason}") from e
     except urllib.error.URLError as e:
         raise RuntimeError(f"HTTP relay URLError: {e.reason}") from e
 
