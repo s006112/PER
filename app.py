@@ -285,4 +285,4 @@ with gr.Blocks(title="Photometric extraction") as demo:
     demo.load(fn=lambda: None, inputs=[], outputs=[], js=get_drawing_javascript())
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(server_name="0.0.0.0", server_port=7860)
