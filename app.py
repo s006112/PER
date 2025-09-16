@@ -3,15 +3,11 @@ from __future__ import annotations
 import os
 import re
 from typing import Tuple, List
-import base64
-import json
-import logging
 from dotenv import load_dotenv
 from pathlib import Path
 import gradio as gr
 from openai import OpenAI
 from cie1931 import get_canvas_html, get_drawing_javascript
-import ftp
 
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -204,34 +200,7 @@ def handle_upload(file_path: str) -> Tuple[str, List[List[float | str]], str]:
     return combined_summary, cct_xy, text
 
 
-# ----------------------------
-# CIE PNG upload bridge (from JS)
-# ----------------------------
-def handle_cie_png_upload(payload: str) -> str:
-    """Receive a JSON payload {filename, data_url}, save PNG, then FTP upload.
-
-    Minimal error handling; logs but does not raise.
-    """
-    if not payload:
-        return ""
-    try:
-        data = json.loads(payload)
-        fname = str(data.get("filename") or "").strip()
-        data_url = str(data.get("data_url") or "")
-        if not fname or not data_url.startswith("data:image/png;base64,"):
-            return ""
-        b64 = data_url.split("base64,", 1)[-1]
-        raw = base64.b64decode(b64)
-        try:
-            # Upload directly from memory without saving to disk
-            ftp.upload_file(remote_name=fname, data=raw)
-            return f"Uploaded {fname}"
-        except Exception as e:
-            logging.getLogger("ftps_upload").error("Upload trigger failed: %s", e)
-            return f"Upload failed for {fname}"
-    except Exception as e:
-        logging.getLogger("ftps_upload").error("PNG receive failed: %s", e)
-        return ""
+# (Removed) CIE PNG upload bridge and FTP logic
 
 # ----------------------------
 # UI
@@ -263,36 +232,20 @@ with gr.Blocks(title="Photometric extraction") as demo:
         elem_id="cct_xy_df",
     )
 
-    # Hide the two components via CSS so they remain in the DOM
-    cie_png_upload_box = gr.Textbox(label="CIE PNG Upload", elem_id="cie_png_upload")
-    cie_upload_status = gr.Markdown(value="", elem_id="cie_upload_status")
-
     gr.HTML(
         """
         <style>
           #cct_xy_df { display: none !important; }
           #original_text_box { display: none !important; }
-          #cie_png_upload { display: none !important; }
         </style>
         """
     )
 
     # Wire outputs: summary (visible), dataframe + original text (hidden but functional)
     btn.click(handle_upload, inputs=inp, outputs=[combined_summary_box, cct_xy_box, original_text_box])
-    cie_png_upload_box.change(handle_cie_png_upload, inputs=cie_png_upload_box, outputs=[cie_upload_status])
 
     # Load JS for CIE canvas drawing
     demo.load(fn=lambda: None, inputs=[], outputs=[], js=get_drawing_javascript())
 
 if __name__ == "__main__":
-
-    # --- temporary self-test for HTTPS relay ---
-    if os.getenv("HTTP_RELAY_SELFTEST") == "1":
-        try:
-            ftp.upload_file(data=b"selftest", remote_name="hf_selftest.txt")
-            print("HTTPS relay self-test: OK")
-        except Exception as e:
-            print("HTTPS relay self-test: FAIL:", e)
-    # --- end self-test ---
-    
     demo.launch(server_name="0.0.0.0", server_port=7860)
