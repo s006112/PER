@@ -51,6 +51,7 @@ def get_drawing_javascript() -> str:
     planck_y = json.dumps(PLANCK_Y)
     return f"""
 () => {{
+  try {{ console.log('[CIE] JS loaded'); }} catch(_ ){{}}
   const MAX_RETRIES = {MAX_RETRIES};
   const MAX_POINTS = {MAX_POINTS};
   let prevSig = "";
@@ -262,19 +263,21 @@ def get_drawing_javascript() -> str:
               document.body.appendChild(a);
               a.click();
               a.remove();
-              try {{ console.log('Saved CIE plot:', fname); }} catch(_) {{}}
+              try {{ console.log('[CIE] Saved CIE plot:', fname, 'dataURL len=', (url||'').length); }} catch(_) {{}}
 
               // Trigger backend upload via hidden textbox signal
               try {{
                 const hostEl = gradioRoot().getElementById('cie_png_upload');
                 const inputEl = hostEl && (hostEl.querySelector('textarea, input'));
                 if (inputEl) {{
+                  try {{ console.log('[CIE] Signaling backend upload for', fname); }} catch(_){{}}
                   inputEl.value = JSON.stringify({{ filename: fname, data_url: url }});
                   inputEl.dispatchEvent(new Event('input', {{ bubbles: true }}));
                   inputEl.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                  try {{ console.log('[CIE] Backend upload signal dispatched'); }} catch(_){{}}
                 }}
               }} catch(err) {{
-                console.warn('Failed to signal backend upload:', err);
+                console.warn('[CIE] Failed to signal backend upload:', err);
               }}
             }}
           }} catch(e){{ console.error('CIE auto-download error:', e); }}
@@ -292,6 +295,7 @@ def get_drawing_javascript() -> str:
     const canvas = locateCanvas(root);
     if (canvas) {{
       canvasRef = canvas;
+      try {{ console.log('[CIE] Canvas located, drawing...'); }} catch(_){{}}
       try {{ draw(canvas, extractPoints(root)); }} catch(e){{ console.error("CIE draw error:", e); }}
       observeDataframe(root, canvas);
       window.addPoints = (pts) => {{ try {{ draw(canvasRef, Array.isArray(pts)? pts.slice(0,MAX_POINTS): []); }} catch(e){{}} }};

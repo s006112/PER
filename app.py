@@ -5,6 +5,7 @@ import re
 import json
 import base64
 import io
+import logging
 from typing import Tuple, List
 from dotenv import load_dotenv
 from pathlib import Path
@@ -13,6 +14,11 @@ from openai import OpenAI
 from cie1931 import get_canvas_html, get_drawing_javascript
 
 load_dotenv()
+
+# Basic logging setup (tune via LOG_LEVEL env; default INFO)
+_LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=getattr(logging, _LOG_LEVEL, logging.INFO), format="%(levelname)s: %(message)s")
+log = logging.getLogger("app")
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # PNG upload target (aligns with upload_test.py behavior)
@@ -209,33 +215,75 @@ def handle_upload(file_path: str) -> Tuple[str, List[List[float | str]], str]:
 # ----------------------------
 # CIE PNG upload bridge (DataURL -> remote upload)
 # ----------------------------
-def _post_png_bytes(filename: str, data: bytes) -> None:
-    """Upload PNG bytes to remote host per upload_test.py algorithm."""
-    try:
-        import requests
-        files = {PNG_UPLOAD_FIELD: (filename, io.BytesIO(data), "image/png")}
-        requests.post(PNG_UPLOAD_URL, files=files, timeout=30)
-    except Exception:
-        # Best-effort; keep UI responsive and silent on failures
-        pass
+def _post_png_bytes(filename: str, data: bytes):
+    """Upload PNG bytes to remote host per upload_test.py algorithm.
+    Returns (status_code, body_head) on success, or raises on error.
+    """
+    import requests
+    files = {PNG_UPLOAD_FIELD: (filename, io.BytesIO(data), "image/png")}
+    resp = requests.post(PNG_UPLOAD_URL, files=files, timeout=30)
+    return resp.status_code, (resp.text or "")[:500]
 
 
-def upload_cie_png(payload: str) -> None:
-    """Gradio change-callback: receive JSON {filename, data_url} and upload PNG."""
+def upload_cie_png(payload: str) -> str:
+    """Gradio change-callback: receive JSON {filename, data_url} and upload PNG.
+    Returns a short log message for UI visibility.
+    """
+    log_lines = []
     try:
         if not payload:
-            return None
-        obj = json.loads(payload)
+            msg = "No payload received from frontend."
+            log.warning(msg)
+            return msg
+
+        log.debug("CIE upload payload length=%d", len(payload))
+        log_lines.append(f"recv payload len={len(payload)}")
+
+        try:
+            obj = json.loads(payload)
+        except Exception as e:
+            msg = f"JSON parse error: {e}"
+            log.error(msg)
+            return msg
+
         fname = (obj.get("filename") or "cie.png").strip() or "cie.png"
         data_url = obj.get("data_url") or ""
         if not data_url.startswith("data:image/png;base64,"):
-            return None
+            msg = "Invalid data URL prefix (expect data:image/png;base64,)."
+            log.error(msg)
+            return msg
+
         b64 = data_url.split(",", 1)[1]
-        png_bytes = base64.b64decode(b64)
-        _post_png_bytes(fname, png_bytes)
-    except Exception:
-        # Silent best-effort
-        return None
+        try:
+            png_bytes = base64.b64decode(b64)
+        except Exception as e:
+            msg = f"Base64 decode failed: {e}"
+            log.error(msg)
+            return msg
+
+        log.info("Decoded PNG bytes: %d", len(png_bytes))
+        log_lines.append(f"decoded bytes={len(png_bytes)}")
+
+        try:
+            log.info("POSTing PNG to %s as field '%s' filename '%s'", PNG_UPLOAD_URL, PNG_UPLOAD_FIELD, fname)
+            code, body = _post_png_bytes(fname, png_bytes)
+            log.info("Upload response: %s", code)
+            # Surface short result in UI
+            result = f"upload -> {code}"
+            if code >= 400:
+                # include a small snippet for errors
+                snippet = (body or "").replace("\n", " ")[:160]
+                result += f" error: {snippet}"
+            log_lines.append(result)
+            return " | ".join(log_lines)
+        except Exception as e:
+            msg = f"Upload exception: {e.__class__.__name__}: {e}"
+            log.exception(msg)
+            return msg
+    except Exception as e:
+        msg = f"Unexpected error: {e}"
+        log.exception(msg)
+        return msg
 
 # ----------------------------
 # UI
@@ -247,6 +295,7 @@ with gr.Blocks(title="Photometric extraction") as demo:
     btn = gr.Button("Submit")
 
     combined_summary_box = gr.Textbox(label="Summary", lines=14, show_copy_button=True)
+    upload_log_box = gr.Textbox(label="Upload log", lines=3)
 
     # CIE chart
     gr.HTML(get_canvas_html(), elem_id="cie_box")
@@ -291,7 +340,7 @@ with gr.Blocks(title="Photometric extraction") as demo:
     demo.load(fn=lambda: None, inputs=[], outputs=[], js=get_drawing_javascript())
 
     # Wire hidden upload bridge: when JS writes JSON into the hidden textbox, upload PNG
-    cie_png_upload_box.change(upload_cie_png, inputs=[cie_png_upload_box], outputs=[])
+    cie_png_upload_box.change(upload_cie_png, inputs=[cie_png_upload_box], outputs=[upload_log_box])
 
 if __name__ == "__main__":
     demo.launch(server_name="0.0.0.0", server_port=7860)
