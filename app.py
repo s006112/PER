@@ -21,9 +21,9 @@ logging.basicConfig(level=getattr(logging, _LOG_LEVEL, logging.INFO), format="%(
 log = logging.getLogger("app")
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# PNG upload target (aligns with upload_test.py behavior)
-PNG_UPLOAD_URL = os.getenv("PNG_UPLOAD_URL", "https://baltech-industry.com/PER/upload.php")
-PNG_UPLOAD_FIELD = os.getenv("PNG_UPLOAD_FIELD", "file")
+# PNG upload target (must be provided via env/.env/Space Secrets)
+PNG_UPLOAD_URL = os.getenv("PNG_UPLOAD_URL")
+PNG_UPLOAD_FIELD = os.getenv("PNG_UPLOAD_FIELD")
 
 # ----------------------------
 # PDF parsing
@@ -233,6 +233,17 @@ def upload_cie_png(payload: str) -> str:
     try:
         if not payload:
             msg = "No payload received from frontend."
+            log.warning(msg)
+            return msg
+
+        # Ensure remote upload is configured via environment (no hardcoded defaults)
+        if not PNG_UPLOAD_URL or not PNG_UPLOAD_FIELD:
+            missing = []
+            if not PNG_UPLOAD_URL:
+                missing.append("PNG_UPLOAD_URL")
+            if not PNG_UPLOAD_FIELD:
+                missing.append("PNG_UPLOAD_FIELD")
+            msg = f"Upload disabled; missing env: {', '.join(missing)}"
             log.warning(msg)
             return msg
 
