@@ -55,7 +55,7 @@ def get_drawing_javascript() -> str:
   const MAX_RETRIES = {MAX_RETRIES};
   const MAX_POINTS = {MAX_POINTS};
   let prevSig = "";
-  let lastDownloadedSig = "";
+  let lastUploadedSig = "";
   let bgCanvas = null;
   let canvasRef = null;
   const PLANCK_X = {planck_x};
@@ -64,12 +64,6 @@ def get_drawing_javascript() -> str:
   function gradioRoot() {{
     const ga = document.querySelector('gradio-app');
     return ga && ga.shadowRoot ? ga.shadowRoot : document;
-  }}
-  
-  function locateCanvas(root) {{
-    const host = root.getElementById("cie_box");
-    const c = host ? host.querySelector("#cie") : root.getElementById("cie");
-    return c || null;
   }}
 
   function extractPoints(root){{
@@ -210,23 +204,16 @@ def get_drawing_javascript() -> str:
     function drawPoints(points){{
       if (!Array.isArray(points) || !points.length) return;
       const size = 4;
-      ctx.lineWidth = 1; ctx.strokeStyle = '#fff';
       for (const [_,x,y] of points){{
         if (x < xmin || x > xmax || y < ymin || y > ymax) continue;
         const X=sx(x), Y=sy(y);
-        ctx.beginPath();
-        ctx.moveTo(X - size, Y - size); ctx.lineTo(X + size, Y + size);
-        ctx.moveTo(X - size, Y + size); ctx.lineTo(X + size, Y - size);
-        ctx.stroke();
-      }}
-      ctx.lineWidth = 1; ctx.strokeStyle = '#000';
-      for (const [_,x,y] of points){{
-        if (x < xmin || x > xmax || y < ymin || y > ymax) continue;
-        const X=sx(x), Y=sy(y);
-        ctx.beginPath();
-        ctx.moveTo(X - size, Y - size); ctx.lineTo(X + size, Y + size);
-        ctx.moveTo(X - size, Y + size); ctx.lineTo(X + size, Y - size);
-        ctx.stroke();
+        for (const color of ['#fff', '#000']){{
+          ctx.lineWidth = 1; ctx.strokeStyle = color;
+          ctx.beginPath();
+          ctx.moveTo(X - size, Y - size); ctx.lineTo(X + size, Y + size);
+          ctx.moveTo(X - size, Y + size); ctx.lineTo(X + size, Y - size);
+          ctx.stroke();
+        }}
       }}
     }}
 
@@ -250,19 +237,16 @@ def get_drawing_javascript() -> str:
           try {{ draw(canvas, pts); }} catch(e){{ console.error("CIE redraw error:", e); }}
           try {{
             // When points exist (after Submit) and state is new, trigger backend upload only (no local download)
-            if (Array.isArray(pts) && pts.length > 0 && sig !== lastDownloadedSig) {{
-              lastDownloadedSig = sig;
-              const now = new Date();
-              const pad = (n) => String(n).padStart(2,'0');
-              const ts = `${{now.getFullYear()}}-${{pad(now.getMonth()+1)}}-${{pad(now.getDate())}}_${{pad(now.getHours())}}-${{pad(now.getMinutes())}}-${{pad(now.getSeconds())}}`;
-              let fname = `CIE_${{ts}}.png`;
-              // Prefer filename provided by backend for exact alignment
+            if (Array.isArray(pts) && pts.length > 0 && sig !== lastUploadedSig) {{
+              lastUploadedSig = sig;
+              // Use filename provided by backend for exact alignment
+              let fname = '';
               try {{
                 const nameHost = gradioRoot().getElementById('cie_png_name');
                 const nameInput = nameHost && (nameHost.querySelector('textarea, input'));
-                const preset = nameInput && ((nameInput.value || nameInput.textContent || '').trim());
-                if (preset) {{ fname = preset; }}
+                fname = (nameInput && ((nameInput.value || nameInput.textContent || '').trim())) || '';
               }} catch(_ ){{}}
+              if (!fname) return; // rely solely on backend-provided name
               const url = canvas.toDataURL('image/png');
               // Trigger backend upload via hidden textbox signal
               try {{
@@ -291,7 +275,8 @@ def get_drawing_javascript() -> str:
   let tries = 0;
   (function waitAndDraw(){{
     const root = gradioRoot();
-    const canvas = locateCanvas(root);
+    const host = root.getElementById('cie_box');
+    const canvas = host ? host.querySelector('#cie') : root.getElementById('cie');
     if (canvas) {{
       canvasRef = canvas;
       try {{ console.log('[CIE] Canvas located, drawing...'); }} catch(_){{}}
