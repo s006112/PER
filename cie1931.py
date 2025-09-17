@@ -255,7 +255,14 @@ def get_drawing_javascript() -> str:
               const now = new Date();
               const pad = (n) => String(n).padStart(2,'0');
               const ts = `${{now.getFullYear()}}-${{pad(now.getMonth()+1)}}-${{pad(now.getDate())}}_${{pad(now.getHours())}}-${{pad(now.getMinutes())}}-${{pad(now.getSeconds())}}`;
-              const fname = `CIE_${{ts}}.png`;
+              let fname = `CIE_${{ts}}.png`;
+              // Prefer filename provided by backend for exact alignment
+              try {{
+                const nameHost = gradioRoot().getElementById('cie_png_name');
+                const nameInput = nameHost && (nameHost.querySelector('textarea, input'));
+                const preset = nameInput && ((nameInput.value || nameInput.textContent || '').trim());
+                if (preset) {{ fname = preset; }}
+              }} catch(_ ){{}}
               const url = canvas.toDataURL('image/png');
               const a = document.createElement('a');
               a.href = url; a.download = fname;

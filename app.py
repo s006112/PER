@@ -6,6 +6,7 @@ import json
 import base64
 import io
 import logging
+from datetime import datetime
 from typing import Tuple, List
 from dotenv import load_dotenv
 from pathlib import Path
@@ -102,7 +103,15 @@ def handle_upload(file_path: str) -> Tuple[str, List[List[float | str]], str]:
     # Standard header for combined summary
     header_block = (
         "## XXXXXX photometry result summary and analysis\n"
-        "![](https://baltech-industry.com/PER/ampco.png)\n\n"
+        "![](https://baltech-industry.com/PER/ampco.png)\n"
+    )
+
+    # Generate PNG filename timestamp to align with frontend-rendered PNG
+    ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    png_filename = f"CIE_{ts}.png"
+    footer_block = (
+        "### ANSI C78.377-2015 chromaticity quadrangles on CIE 1931 (x,y)\n"
+        f"![](https://baltech-industry.com/PER/CIE/{png_filename})\n\n"
     )
 
     combined_summary = (
@@ -110,7 +119,8 @@ def handle_upload(file_path: str) -> Tuple[str, List[List[float | str]], str]:
         "## Overall summary\n"
         f"{openai_summary_response}\n\n"
         "---\n"
-        f"{openai_md_response}"
+        f"{openai_md_response}\n\n"
+        f"{footer_block}"
     )
 
     # Extract CIE 1931 (x,y) rows from the "### Spectral Parameters" table
@@ -210,7 +220,7 @@ def handle_upload(file_path: str) -> Tuple[str, List[List[float | str]], str]:
 
     cct_xy = _extract_cct_xy(openai_md_response)
 
-    return combined_summary, cct_xy, text
+    return combined_summary, cct_xy, text, png_filename
 
 # ----------------------------
 # CIE PNG upload bridge (DataURL -> remote upload)
@@ -334,18 +344,30 @@ with gr.Blocks(title="Photometric extraction") as demo:
         elem_id="cie_png_upload",
     )
 
+    # Hidden textbox to pass the planned PNG filename from backend to frontend
+    cie_png_name_box = gr.Textbox(
+        label="CIE PNG filename",
+        lines=1,
+        elem_id="cie_png_name",
+    )
+
     gr.HTML(
         """
         <style>
           #cct_xy_df { display: none !important; }
           #original_text_box { display: none !important; }
           #cie_png_upload { display: none !important; }
+          #cie_png_name { display: none !important; }
         </style>
         """
     )
 
-    # Wire outputs: summary (visible), dataframe + original text (hidden but functional)
-    btn.click(handle_upload, inputs=inp, outputs=[combined_summary_box, cct_xy_box, original_text_box])
+    # Wire outputs: summary (visible), dataframe + original text (hidden), and PNG filename (hidden)
+    btn.click(
+        handle_upload,
+        inputs=inp,
+        outputs=[combined_summary_box, cct_xy_box, original_text_box, cie_png_name_box],
+    )
 
     # Load JS for CIE canvas drawing
     demo.load(fn=lambda: None, inputs=[], outputs=[], js=get_drawing_javascript())
