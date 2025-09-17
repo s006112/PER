@@ -22,7 +22,7 @@ log = logging.getLogger("app")
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # PNG upload target (aligns with upload_test.py behavior)
-PNG_UPLOAD_URL = os.getenv("PNG_UPLOAD_URL", "https://baltech-industry.com/upload.php")
+PNG_UPLOAD_URL = os.getenv("PNG_UPLOAD_URL", "https://baltech-industry.com/PER/upload.php")
 PNG_UPLOAD_FIELD = os.getenv("PNG_UPLOAD_FIELD", "file")
 
 # ----------------------------
