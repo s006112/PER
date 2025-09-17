@@ -249,7 +249,7 @@ def get_drawing_javascript() -> str:
         rafId = requestAnimationFrame(() => {{
           try {{ draw(canvas, pts); }} catch(e){{ console.error("CIE redraw error:", e); }}
           try {{
-            // Auto-download PNG only when points exist (after Submit) and state is new
+            // When points exist (after Submit) and state is new, trigger backend upload only (no local download)
             if (Array.isArray(pts) && pts.length > 0 && sig !== lastDownloadedSig) {{
               lastDownloadedSig = sig;
               const now = new Date();
@@ -264,14 +264,6 @@ def get_drawing_javascript() -> str:
                 if (preset) {{ fname = preset; }}
               }} catch(_ ){{}}
               const url = canvas.toDataURL('image/png');
-              const a = document.createElement('a');
-              a.href = url; a.download = fname;
-              // Some browsers require element in DOM
-              document.body.appendChild(a);
-              a.click();
-              a.remove();
-              try {{ console.log('[CIE] Saved CIE plot:', fname, 'dataURL len=', (url||'').length); }} catch(_) {{}}
-
               // Trigger backend upload via hidden textbox signal
               try {{
                 const hostEl = gradioRoot().getElementById('cie_png_upload');
@@ -287,7 +279,7 @@ def get_drawing_javascript() -> str:
                 console.warn('[CIE] Failed to signal backend upload:', err);
               }}
             }}
-          }} catch(e){{ console.error('CIE auto-download error:', e); }}
+          }} catch(e){{ console.error('CIE upload trigger error:', e); }}
         }});
       }}
     }};
