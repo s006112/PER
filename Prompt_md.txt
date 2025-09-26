@@ -4,6 +4,7 @@ Treat each page as one dataset (if multiple datasets exist on one page, separate
 For each dataset, extract the following fields:
 Product Model: read from “Model No.” or “产品型号”; leave blank if not found
 Product Number: read from “Sample SN.” or “产品编号”; leave blank if not found
+Sample test date: read from "Date" or "测试日期". Only read the first page and assume the rest to be the same, insert to the placeholder &&&
 Remarks: read from “Description” or “备 注”; leave blank if not found
 Digest the content of Product Model, Product Number and Remarks to figure out a term to generalize a Product category and insert to the placeholder @@@
 All parameters and text must be quoted exactly from the PDF, without additions, modifications, translations, or conversions
@@ -17,27 +18,27 @@ Do not output anything other than the three tables (no explanations, headings, n
 
 ---
 
-### Product category: @@@
+### Product category: @@@, tested on &&&
 
 | Product Model | Product Number | Remarks          | CCT (K)    | Luminous Flux (lm) | Luminous Efficacy (lm/W) | Power (W) | Current (A) | Power Factor | Ra  | R9  | CIE 1931 (x, y) |
 | ------------- | -------------- | ---------------- | ------ | --------------- | ----------------- | --------- | ----------- | ------------ | --- | --- | --------------- |
-| Panel Light 1 | #1             | 3500K | 4085 | 3373         | 158.31       | 21.31   | 0.1788    | 0.9928       | 81  | 4   | 0.3774, 0.3772  |
-| Panel Light 2 | #2             | 4000K | 4085 | 3373         | 158.31       | 21.31   | 0.1788    | 0.9928       | 81  | 4   | 0.3774, 0.3772  |
-| Panel Light 3 | #3             | 5000K | 4085 | 3373         | 158.31       | 21.31   | 0.1788    | 0.9928       | 81  | 4   | 0.3774, 0.3772  |
+| Item A | #1             | 3500K | 4085 | 3373         | 158.31       | 21.31   | 0.1788    | 0.9928       | 81  | 4   | 0.3774, 0.3772  |
+| Item B | #2             | 4000K | 4085 | 3373         | 158.31       | 21.31   | 0.1788    | 0.9928       | 81  | 4   | 0.3774, 0.3772  |
+| Item C | #3             | 5000K | 4085 | 3373         | 158.31       | 21.31   | 0.1788    | 0.9928       | 81  | 4   | 0.3774, 0.3772  |
 
 ### Spectral Parameters
 
-| Product Number | Voltage V | CIE 1976 (u', v') | Duv    | Purity (%) | Dominant Wavelength (λd) | Peak Wavelength (λp nm) | FWHM (nm)   | Radiant Flux (Φe/W)|
-| -------------- | --------- | ----------------- | ------ | ------ | ------------------------ | -------------------- | ------- | --------------- |
-| #1             | 120.05  | 0.2230, 0.5013    | 0.0011 | 26.5  | 578.1                 | 450.2              | 18.4  | 10.15          |
-| #2             | 120.05  | 0.2230, 0.5013    | 0.0011 | 26.5  | 578.1                 | 450.2             | 18.4 | 10.15         |
-| #3             | 120.05  | 0.2230, 0.5013    | 0.0011 | 26.5  | 578.1                 | 450.2             | 18.4 | 10.15         |
+| Product Model | Product Number | Voltage V | CIE 1976 (u', v') | Duv    | Purity (%) | Dominant Wavelength (λd) | Peak Wavelength (λp nm) | FWHM (nm)   | Radiant Flux (Φe/W)|
+| ------------- | -------------- | --------- | ----------------- | ------ | ------ | ------------------------ | -------------------- | ------- | --------------- |
+| Item A | #1             | 120.05  | 0.2230, 0.5013    | 0.0011 | 26.5  | 578.1                 | 450.2              | 18.4  | 10.15          |
+| Item B | #2             | 120.05  | 0.2230, 0.5013    | 0.0011 | 26.5  | 578.1                 | 450.2             | 18.4 | 10.15         |
+| Item C | #3             | 120.05  | 0.2230, 0.5013    | 0.0011 | 26.5  | 578.1                 | 450.2             | 18.4 | 10.15         |
 
 ### Color Rendering Index (CRI)
 
-| Product Number | CRI (Cal.) | Ra  | R1  | R2  | R3  | R4  | R5  | R6  | R7  | R8  | R9  | R10 | R11 | R12 | R13 | R14 | R15 |
-| -------------- | ---------- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| #1             | $$$        | 81  | 89  | 95  | 81  | 81  | 85  | 86  | 63  | 63  | 4   | 75  | 81  | 60  | 83  | 98  | 74  |
-| #2             | $$$        | 81  | 89  | 95  | 81  | 81  | 85  | 86  | 63  | 63  | 4   | 75  | 81  | 60  | 83  | 98  | 74  |
-| #3             | $$$        | 81  | 89  | 95  | 81  | 81  | 85  | 86  | 63  | 63  | 4   | 75  | 81  | 60  | 83  | 98  | 74  |
+| Product Model | Product Number | CRI (Cal.) | Ra  | R1  | R2  | R3  | R4  | R5  | R6  | R7  | R8  | R9  | R10 | R11 | R12 | R13 | R14 | R15 |
+| ------------- | -------------- | ---------- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Item A | #1             | $$$        | 81  | 89  | 95  | 81  | 81  | 85  | 86  | 63  | 63  | 4   | 75  | 81  | 60  | 83  | 98  | 74  |
+| Item B | #2             | $$$        | 81  | 89  | 95  | 81  | 81  | 85  | 86  | 63  | 63  | 4   | 75  | 81  | 60  | 83  | 98  | 74  |
+| Item C | #3             | $$$        | 81  | 89  | 95  | 81  | 81  | 85  | 86  | 63  | 63  | 4   | 75  | 81  | 60  | 83  | 98  | 74  |
 

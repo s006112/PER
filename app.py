@@ -101,15 +101,23 @@ def handle_upload(file_path: str) -> Tuple[str, List[List[float | str]], str]:
     openai_summary_response = query_openai_with_prompt(prompt_summary_str, openai_md_response)
 
     # Standard header for combined summary
+    now = datetime.now()
+    report_date = now.strftime("%Y-%m-%d")
     header_block = (
         "## XXXXXX photometry result summary and analysis\n"
+        f"- Report generated on {report_date} \n"
         "![](https://baltech-industry.com/PER/ampco.png)\n"
     )
 
     # Generate PNG filename timestamp to align with frontend-rendered PNG
-    ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    ts = now.strftime("%Y-%m-%d_%H-%M-%S")
     png_filename = f"CIE_{ts}.png"
     footer_block = (
+        "### Conclusion & Follow-up Actions\n"
+        "- [ ] \n"
+        "- [ ] \n"
+        "- [ ] \n"
+        "\n"
         "### ANSI C78.377-2015 chromaticity quadrangles on CIE 1931 (x,y)\n"
         f"![](https://baltech-industry.com/PER/CIE/{png_filename})\n\n"
     )
