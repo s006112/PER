@@ -18,7 +18,7 @@ Do not output anything other than the three tables (no explanations, headings, n
 
 ---
 
-### Product category: @@@, tested on &&&
+### @@@, tested on &&&
 
 | Product Model | Product Number | Remarks          | CCT (K)    | Luminous Flux (lm) | Luminous Efficacy (lm/W) | Power (W) | Current (A) | Power Factor | Ra  | R9  | CIE 1931 (x, y) |
 | ------------- | -------------- | ---------------- | ------ | --------------- | ----------------- | --------- | ----------- | ------------ | --- | --- | --------------- |

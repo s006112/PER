@@ -113,11 +113,6 @@ def handle_upload(file_path: str) -> Tuple[str, List[List[float | str]], str]:
     ts = now.strftime("%Y-%m-%d_%H-%M-%S")
     png_filename = f"CIE_{ts}.png"
     footer_block = (
-        "### Conclusion & Follow-up Actions\n"
-        "- [ ] \n"
-        "- [ ] \n"
-        "- [ ] \n"
-        "\n"
         "### ANSI C78.377-2015 chromaticity quadrangles on CIE 1931 (x,y)\n"
         f"![](https://baltech-industry.com/PER/CIE/{png_filename})\n\n"
     )
@@ -126,6 +121,10 @@ def handle_upload(file_path: str) -> Tuple[str, List[List[float | str]], str]:
         f"{header_block}"
         "## Overall summary\n"
         f"{openai_summary_response}\n\n"
+        "### Conclusion & Follow-up Actions\n"
+        "- [ ] \n"
+        "- [ ] \n"
+        "- [ ] \n"
         "---\n"
         f"{openai_md_response}\n\n"
         f"{footer_block}"
