@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import logging
-from datetime import datetime
 from typing import Tuple
 from dotenv import load_dotenv
 from pathlib import Path
@@ -61,10 +60,10 @@ def handle_upload(file_path: str) -> Tuple[str, str]:
     """
     Gradio callback
     - Read PDF path, extract text
-    - Query OpenAI twice (details + summary)
+    - Query OpenAI for PO extraction details
 
     Returns:
-      combined_summary (str), pdf_parsing_text (str)
+      po_response_text (str), pdf_parsing_text (str)
     """
 
     if not file_path or not os.path.isfile(file_path):
@@ -82,47 +81,19 @@ def handle_upload(file_path: str) -> Tuple[str, str]:
         prompt_po_str = (base_dir / "Prompt_po.txt").read_text("utf-8")
     except Exception as e:
         return f"Error reading Prompt_po.txt: {e}", ""
-    try:
-        prompt_summary_str = (base_dir / "Prompt_summary.txt").read_text("utf-8")
-    except Exception as e:
-        return f"Error reading Prompt_summary.txt: {e}", ""
-
     openai_po_response = query_openai_with_prompt(prompt_po_str, pdf_parsing_text)
-    openai_summary_response = query_openai_with_prompt(prompt_summary_str, openai_po_response)
-
-    # Standard header for combined summary
-    now = datetime.now()
-    report_date = now.strftime("%Y-%m-%d")
-    header_block = (
-        "## XXXXXX photometry result summary and analysis\n"
-        f"- Report generated on {report_date} \n"
-        "![](https://baltech-industry.com/PER/ampco.png)\n"
-    )
-
-    combined_summary = (
-        f"{header_block}"
-        "## Overall summary\n"
-        f"{openai_summary_response}\n\n"
-        "### Conclusion & Follow-up Actions\n"
-        "- [ ] \n"
-        "- [ ] \n"
-        "- [ ] \n"
-        "---\n"
-        f"{openai_po_response}\n\n"
-    )
-
-    return combined_summary, pdf_parsing_text
+    return openai_po_response, pdf_parsing_text
 
 # ----------------------------
 # UI
 # ----------------------------
 with gr.Blocks(title="Photometric extraction") as demo:
-    # Minimal visible controls: Upload, Submit, Summary
+    # Minimal visible controls: Upload, Submit, PO response
     with gr.Row():
         inp = gr.File(label="Upload PDF File", file_types=[".pdf"], type="filepath")
     btn = gr.Button("Submit")
 
-    combined_summary_box = gr.Textbox(label="Summary", lines=14, show_copy_button=True)
+    po_response_box = gr.Textbox(label="PO response", lines=14, show_copy_button=True)
 
     pdf_parsing_box = gr.Textbox(
         label="PDF parsing",
@@ -131,12 +102,12 @@ with gr.Blocks(title="Photometric extraction") as demo:
         elem_id="pdf_parsing_box",
     )
 
-    # Wire outputs: summary (visible) and raw PDF parsing text (hidden but copyable)
+    # Wire outputs: PO response (visible) and raw PDF parsing text (hidden but copyable)
     btn.click(
         handle_upload,
         inputs=inp,
-        outputs=[combined_summary_box, pdf_parsing_box],
+        outputs=[po_response_box, pdf_parsing_box],
     )
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    demo.launch(server_name="0.0.0.0", server_port=7960)
