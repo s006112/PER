@@ -105,36 +105,32 @@ def handle_upload(file_path: str) -> Tuple[str, List[List[float | str]], str]:
     now = datetime.now()
     report_date = now.strftime("%Y-%m-%d")
     header_block = (
-        "## XXXXXX photometry result summary and analysis\n"
+        "## XXXXXX photometric summary and analysis\n"
         f"- Report generated on {report_date} \n"
-        "![](https://nextcloud.ampco.com.hk/index.php/s/24JX6rAGgS5QKNE/preview)\n"
+        "<p align=\"right\">\n"
+        "  <img src=\"https://nextcloud.ampco.com.hk/index.php/s/24JX6rAGgS5QKNE/preview\" alt=\"Company logo\"/>\n"
+        "</p>\n"
     )
 
     # Generate PNG filename timestamp to align with frontend-rendered PNG
     ts = now.strftime("%Y-%m-%d_%H-%M-%S")
     png_filename = f"CIE_{ts}.png"
 
-    share_info: dict[str, str] | None = None
+    share_info: dict[str, str] = {}
     try:
-        share_info = share(file_path)
+        share_info = share(file_path) or {}
         log.info("Nextcloud share available: %s", share_info.get("page"))
     except Exception as exc:  # noqa: BLE001 - logging for visibility
         log.error("Failed to create Nextcloud share link: %s", exc)
 
+    log.info("Uploaded processed PDF to Nextcloud: %s", share_info.get("remote_path"))
+    filename = Path(file_path).name
     footer_lines = [
         "### ANSI C78.377-2015 chromaticity quadrangles on CIE 1931 (x,y)",
         f"![](https://baltech-industry.com/PER/CIE/{png_filename})",
         "",
+        f"- Photometric report: [{filename}]({share_info.get('page', '')})",
     ]
-    if share_info:
-        log.info("Uploaded processed PDF to Nextcloud: %s", share_info.get("remote_path"))
-        footer_lines.extend(
-            [
-                "### Nextcloud Share Links",
-                f"- View: {share_info['page']}",
-                f"- Download: {share_info['download']}",
-            ]
-        )
     footer_block = "\n".join(footer_lines) + "\n"
 
     combined_summary = (
