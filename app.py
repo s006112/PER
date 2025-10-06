@@ -13,7 +13,7 @@ from pathlib import Path
 import gradio as gr
 from openai import OpenAI
 from cie1931 import get_canvas_html, get_drawing_javascript
-from nextcloud_upload import upload_to_nextcloud
+from nextcloud_upload import share
 
 load_dotenv()
 
@@ -113,10 +113,29 @@ def handle_upload(file_path: str) -> Tuple[str, List[List[float | str]], str]:
     # Generate PNG filename timestamp to align with frontend-rendered PNG
     ts = now.strftime("%Y-%m-%d_%H-%M-%S")
     png_filename = f"CIE_{ts}.png"
-    footer_block = (
-        "### ANSI C78.377-2015 chromaticity quadrangles on CIE 1931 (x,y)\n"
-        f"![](https://baltech-industry.com/PER/CIE/{png_filename})\n\n"
-    )
+
+    share_info: dict[str, str] | None = None
+    try:
+        share_info = share(file_path)
+        log.info("Nextcloud share available: %s", share_info.get("page"))
+    except Exception as exc:  # noqa: BLE001 - logging for visibility
+        log.error("Failed to create Nextcloud share link: %s", exc)
+
+    footer_lines = [
+        "### ANSI C78.377-2015 chromaticity quadrangles on CIE 1931 (x,y)",
+        f"![](https://baltech-industry.com/PER/CIE/{png_filename})",
+        "",
+    ]
+    if share_info:
+        log.info("Uploaded processed PDF to Nextcloud: %s", share_info.get("remote_path"))
+        footer_lines.extend(
+            [
+                "### Nextcloud Share Links",
+                f"- View: {share_info['page']}",
+                f"- Download: {share_info['download']}",
+            ]
+        )
+    footer_block = "\n".join(footer_lines) + "\n"
 
     combined_summary = (
         f"{header_block}"
@@ -227,12 +246,6 @@ def handle_upload(file_path: str) -> Tuple[str, List[List[float | str]], str]:
             return []
 
     cct_xy = _extract_cct_xy(openai_md_response)
-
-    remote_path = upload_to_nextcloud(file_path)
-    if remote_path:
-        log.info("Uploaded processed PDF to Nextcloud: %s", remote_path)
-    else:
-        log.error("Failed to upload processed PDF to Nextcloud.")
 
     return combined_summary, cct_xy, text, png_filename
 
