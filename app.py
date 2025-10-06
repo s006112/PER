@@ -13,6 +13,7 @@ from pathlib import Path
 import gradio as gr
 from openai import OpenAI
 from cie1931 import get_canvas_html, get_drawing_javascript
+from nextcloud_upload import upload_to_nextcloud
 
 load_dotenv()
 
@@ -106,7 +107,7 @@ def handle_upload(file_path: str) -> Tuple[str, List[List[float | str]], str]:
     header_block = (
         "## XXXXXX photometry result summary and analysis\n"
         f"- Report generated on {report_date} \n"
-        "![](https://baltech-industry.com/PER/ampco.png)\n"
+        "![](https://nextcloud.ampco.com.hk/index.php/s/24JX6rAGgS5QKNE/preview)\n"
     )
 
     # Generate PNG filename timestamp to align with frontend-rendered PNG
@@ -226,6 +227,12 @@ def handle_upload(file_path: str) -> Tuple[str, List[List[float | str]], str]:
             return []
 
     cct_xy = _extract_cct_xy(openai_md_response)
+
+    remote_path = upload_to_nextcloud(file_path)
+    if remote_path:
+        log.info("Uploaded processed PDF to Nextcloud: %s", remote_path)
+    else:
+        log.error("Failed to upload processed PDF to Nextcloud.")
 
     return combined_summary, cct_xy, text, png_filename
 
