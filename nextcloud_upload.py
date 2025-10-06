@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import logging
 from pathlib import Path
 from typing import Dict, Iterable, Tuple
 from urllib.parse import quote
@@ -9,11 +10,13 @@ import requests
 from dotenv import load_dotenv
 
 _BASE_URL = "https://nextcloud.ampco.com.hk"
-_TARGET_REMOTE_DIR = "/Documents/PER/Photometry Report"
+_PDF_REMOTE_DIR = "/Documents/PER/Photometry Report"
 _OCS_HEADERS = {
     "OCS-APIRequest": "true",
     "Accept": "application/json",
 }
+
+log = logging.getLogger("nextcloud_upload")
 
 
 def load_env() -> Tuple[str, str]:
@@ -62,16 +65,19 @@ def mkcol_recursive(base_url: str, username: str, auth: Tuple[str, str], folders
             raise RuntimeError(f"Failed to create folder '{folder}' ({resp.status_code}){snippet}")
 
 
-def upload_file(local_path: str, remote_dir: str) -> str:
+def upload_file(
+    local_path: str,
+    remote_dir: str,
+    base_url: str,
+    username: str,
+    auth: Tuple[str, str],
+) -> str:
     """Upload a file to Nextcloud and return the remote path."""
     local_file = Path(local_path).expanduser()
     if not local_file.is_file():
         raise FileNotFoundError(f"Local file not found: {local_file}")
 
-    username, password = load_env()
-    auth = (username, password)
-
-    base_url = _BASE_URL.rstrip("/")
+    base_url = base_url.rstrip("/")
     encoded_username = quote(username, safe="")
     remote_root = f"{base_url}/remote.php/dav/files/{encoded_username}"
 
@@ -167,33 +173,35 @@ def create_or_get_public_share(base_url: str, auth: Tuple[str, str], remote_path
     return _format_share_payload(share)
 
 
-def upload_to_nextcloud(local_path: str) -> str | None:
-    """High-level upload helper that ensures directories exist and handles errors."""
-    try:
-        username, password = load_env()
-        auth = (username, password)
-        folders = [segment for segment in _TARGET_REMOTE_DIR.strip("/").split("/") if segment]
-        mkcol_recursive(_BASE_URL, username, auth, folders)
-        remote_path = upload_file(local_path, _TARGET_REMOTE_DIR)
-        print(f"Uploaded '{Path(local_path).name}' to Nextcloud at {remote_path}")
-        return remote_path
-    except Exception as exc:  # noqa: BLE001 - report any issue up the stack
-        print(f"Nextcloud upload failed: {exc}")
-        return None
-
-
 def share(local_path: str) -> Dict[str, str]:
     """Upload a file and return its public share links."""
+    return share_file(local_path, _PDF_REMOTE_DIR)
+
+
+def share_file(local_path: str, remote_dir: str) -> Dict[str, str]:
+    """Uploads a file to Nextcloud and returns share URLs."""
     username, password = load_env()
     auth = (username, password)
 
-    remote_path = upload_to_nextcloud(local_path)
-    if not remote_path:
-        raise RuntimeError("Upload failed; cannot create share link")
+    folders = [segment for segment in remote_dir.strip("/").split("/") if segment]
+    if folders:
+        mkcol_recursive(_BASE_URL, username, auth, folders)
 
+    remote_path = upload_file(local_path, remote_dir, _BASE_URL, username, auth)
     relative_path = remote_path.lstrip("/")
-    share_payload = create_or_get_public_share(_BASE_URL, auth, relative_path)
+
+    try:
+        share_payload = create_or_get_public_share(_BASE_URL, auth, relative_path)
+    except Exception as exc:  # noqa: BLE001 - surface but continue
+        log.warning("Unable to create share link for %s: %s", remote_path, exc)
+        return {"remote_path": remote_path}
+
     return {
         "remote_path": remote_path,
         **share_payload,
     }
+
+
+def ushare(local_path: str, remote_dir: str) -> Dict[str, str]:
+    """Convenience wrapper to upload and share a file to an arbitrary directory."""
+    return share_file(local_path, remote_dir)

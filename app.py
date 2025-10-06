@@ -4,8 +4,8 @@ import os
 import re
 import json
 import base64
-import io
 import logging
+import tempfile
 from datetime import datetime
 from typing import Tuple, List
 from dotenv import load_dotenv
@@ -13,7 +13,7 @@ from pathlib import Path
 import gradio as gr
 from openai import OpenAI
 from cie1931 import get_canvas_html, get_drawing_javascript
-from nextcloud_upload import share
+from nextcloud_upload import share, ushare
 
 load_dotenv()
 
@@ -23,9 +23,10 @@ logging.basicConfig(level=getattr(logging, _LOG_LEVEL, logging.INFO), format="%(
 log = logging.getLogger("app")
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# PNG upload target (must be provided via env/.env/Space Secrets)
-PNG_UPLOAD_URL = os.getenv("PNG_UPLOAD_URL")
-PNG_UPLOAD_FIELD = os.getenv("PNG_UPLOAD_FIELD")
+PNG_REMOTE_DIR = "/Documents/PER/CIE Chart"
+PNG_PLACEHOLDER_PREFIX = "cie-share://"
+
+LATEST_SUMMARY: str = ""
 
 # ----------------------------
 # PDF parsing
@@ -67,7 +68,7 @@ def query_openai_with_prompt(prompt_content: str, text: str) -> str:
 # Upload handler
 # ----------------------------
 
-def handle_upload(file_path: str) -> Tuple[str, List[List[float | str]], str]:
+def handle_upload(file_path: str) -> Tuple[str, List[List[float | str]], str, str]:
     """
     Gradio callback
     - Read PDF path, extract text
@@ -75,7 +76,7 @@ def handle_upload(file_path: str) -> Tuple[str, List[List[float | str]], str]:
     - Parse CIE 1931 (x,y) from the details markdown table
 
     Returns:
-      combined_summary (str), cct_xy ([[label, x, y], ...]), original_text (str)
+      combined_summary (str), cct_xy ([[label, x, y], ...]), original_text (str), png_filename (str)
     """
 
     if not file_path or not os.path.isfile(file_path):
@@ -124,10 +125,13 @@ def handle_upload(file_path: str) -> Tuple[str, List[List[float | str]], str]:
         log.error("Failed to create Nextcloud share link: %s", exc)
 
     log.info("Uploaded processed PDF to Nextcloud: %s", share_info.get("remote_path"))
+
+    placeholder_url = f"{PNG_PLACEHOLDER_PREFIX}{png_filename}"
+
     filename = Path(file_path).name
     footer_lines = [
         "### ANSI C78.377-2015 chromaticity quadrangles on CIE 1931 (x,y)",
-        f"![](https://baltech-industry.com/PER/CIE/{png_filename})",
+        f"![]({placeholder_url})",
         "",
         f"- Photometric report: [{filename}]({share_info.get('page', '')})",
     ]
@@ -145,6 +149,9 @@ def handle_upload(file_path: str) -> Tuple[str, List[List[float | str]], str]:
         f"{openai_md_response}\n\n"
         f"{footer_block}"
     )
+
+    global LATEST_SUMMARY
+    LATEST_SUMMARY = combined_summary
 
     # Extract CIE 1931 (x,y) rows from the "### Spectral Parameters" table
     # - Find the section by heading text
@@ -245,75 +252,42 @@ def handle_upload(file_path: str) -> Tuple[str, List[List[float | str]], str]:
 
     return combined_summary, cct_xy, text, png_filename
 
-# ----------------------------
-# CIE PNG upload bridge (DataURL -> remote upload)
-# ----------------------------
-def _post_png_bytes(filename: str, data: bytes):
-    """Upload PNG bytes to remote host per upload_test.py algorithm.
-    Returns (status_code, body_head) on success, or raises on error.
-    """
-    import requests
-    files = {PNG_UPLOAD_FIELD: (filename, io.BytesIO(data), "image/png")}
-    resp = requests.post(PNG_UPLOAD_URL, files=files, timeout=30)
-    return resp.status_code, (resp.text or "")[:500]
 
+def upload_cie_png(payload: str) -> str:
+    """Receive base64 PNG payload from frontend, upload to Nextcloud, and refresh summary."""
+    global LATEST_SUMMARY
 
-def upload_cie_png(payload: str) -> None:
-    """Gradio change-callback: receive JSON {filename, data_url} and upload PNG.
-    No UI output is produced; uses backend logging only.
-    """
-    try:
-        if not payload:
-            log.warning("No payload received from frontend.")
-            return None
+    if not payload:
+        log.warning("No payload received from frontend for CIE PNG upload.")
+        return LATEST_SUMMARY
 
-        # Ensure remote upload is configured via environment (no hardcoded defaults)
-        if not PNG_UPLOAD_URL or not PNG_UPLOAD_FIELD:
-            missing = []
-            if not PNG_UPLOAD_URL:
-                missing.append("PNG_UPLOAD_URL")
-            if not PNG_UPLOAD_FIELD:
-                missing.append("PNG_UPLOAD_FIELD")
-            log.warning("Upload disabled; missing env: %s", ", ".join(missing))
-            return None
+    obj = json.loads(payload)
+    fname = (obj.get("filename") or "cie.png").strip() or "cie.png"
+    data_url = obj.get("data_url") or ""
+    if not data_url.startswith("data:image/png;base64,"):
+        log.error("Unexpected CIE PNG data URL prefix: %s", data_url[:32])
+        return LATEST_SUMMARY
 
-        log.debug("CIE upload payload length=%d", len(payload))
+    b64_data = data_url.split(",", 1)[1]
+    png_bytes = base64.b64decode(b64_data)
 
-        try:
-            obj = json.loads(payload)
-        except Exception as e:
-            log.error("JSON parse error: %s", e)
-            return None
+    temp_path = Path(tempfile.gettempdir()) / fname
+    temp_path.write_bytes(png_bytes)
 
-        fname = (obj.get("filename") or "cie.png").strip() or "cie.png"
-        data_url = obj.get("data_url") or ""
-        if not data_url.startswith("data:image/png;base64,"):
-            log.error("Invalid data URL prefix (expect data:image/png;base64,).")
-            return None
+    cie_share_info = ushare(str(temp_path), PNG_REMOTE_DIR)
+    log.info("Uploaded CIE PNG to Nextcloud: %s", cie_share_info.get("remote_path"))
+    share_url = cie_share_info.get("page", "")
+    temp_path.unlink(missing_ok=True)
 
-        b64 = data_url.split(",", 1)[1]
-        try:
-            png_bytes = base64.b64decode(b64)
-        except Exception as e:
-            log.error("Base64 decode failed: %s", e)
-            return None
+    if share_url:
+        placeholder = f"{PNG_PLACEHOLDER_PREFIX}{fname}"
+        preview_url = share_url.rstrip("/") + "/preview"
+        if placeholder in LATEST_SUMMARY:
+            LATEST_SUMMARY = LATEST_SUMMARY.replace(placeholder, preview_url)
+    else:
+        log.warning("CIE PNG share link unavailable; retaining placeholder link in summary.")
 
-        log.info("Decoded PNG bytes: %d", len(png_bytes))
-
-        try:
-            log.info("POSTing PNG to %s as field '%s' filename '%s'", PNG_UPLOAD_URL, PNG_UPLOAD_FIELD, fname)
-            code, body = _post_png_bytes(fname, png_bytes)
-            log.info("Upload response: %s", code)
-            if code >= 400:
-                snippet = (body or "").replace("\n", " ")[:160]
-                log.error("Upload error: %s %s", code, snippet)
-            return None
-        except Exception as e:
-            log.exception("Upload exception: %s: %s", e.__class__.__name__, e)
-            return None
-    except Exception as e:
-        log.exception("Unexpected error: %s", e)
-        return None
+    return LATEST_SUMMARY
 
 # ----------------------------
 # UI
@@ -329,7 +303,7 @@ with gr.Blocks(title="Photometric extraction") as demo:
     # CIE chart
     gr.HTML(get_canvas_html(), elem_id="cie_box")
 
-    # Hidden (but present in DOM): original text, parsed CIE x,y table, and CIE PNG upload bridge
+    # Hidden (but present in DOM): original text, parsed CIE x,y table, and planned PNG filename
     # Keep DOM so the JS can read values for plotting.
     original_text_box = gr.Textbox(
         label="Sphere PDF extraction",
@@ -345,7 +319,7 @@ with gr.Blocks(title="Photometric extraction") as demo:
         elem_id="cct_xy_df",
     )
 
-    # Hidden textbox used by JS to signal a PNG data URL to backend for upload
+    # Hidden textbox used by JS to signal a PNG data URL to backend
     cie_png_upload_box = gr.Textbox(
         label="CIE PNG upload payload",
         lines=1,
@@ -381,7 +355,7 @@ with gr.Blocks(title="Photometric extraction") as demo:
     demo.load(fn=lambda: None, inputs=[], outputs=[], js=get_drawing_javascript())
 
     # Wire hidden upload bridge: when JS writes JSON into the hidden textbox, upload PNG
-    cie_png_upload_box.change(upload_cie_png, inputs=[cie_png_upload_box], outputs=[])
+    cie_png_upload_box.change(upload_cie_png, inputs=[cie_png_upload_box], outputs=[combined_summary_box])
 
 if __name__ == "__main__":
     demo.launch(server_name="0.0.0.0", server_port=7860)

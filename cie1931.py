@@ -236,34 +236,27 @@ def get_drawing_javascript() -> str:
         rafId = requestAnimationFrame(() => {{
           try {{ draw(canvas, pts); }} catch(e){{ console.error("CIE redraw error:", e); }}
           try {{
-            // When points exist (after Submit) and state is new, trigger backend upload only (no local download)
             if (Array.isArray(pts) && pts.length > 0 && sig !== lastUploadedSig) {{
+              const rootDoc = gradioRoot();
+              const nameHost = rootDoc.getElementById('cie_png_name');
+              const nameInput = nameHost && (nameHost.querySelector('textarea, input'));
+              const fname = (nameInput && ((nameInput.value || nameInput.textContent || '').trim())) || '';
+              if (!fname) throw new Error('Missing PNG filename');
+
+              const uploadHost = rootDoc.getElementById('cie_png_upload');
+              const uploadInput = uploadHost && (uploadHost.querySelector('textarea, input'));
+              if (!uploadInput) throw new Error('Upload textbox not found');
+
+              const dataUrl = canvas.toDataURL('image/png');
+              uploadInput.value = JSON.stringify({{ filename: fname, data_url: dataUrl }});
+              uploadInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
+              uploadInput.dispatchEvent(new Event('change', {{ bubbles: true }}));
               lastUploadedSig = sig;
-              // Use filename provided by backend for exact alignment
-              let fname = '';
-              try {{
-                const nameHost = gradioRoot().getElementById('cie_png_name');
-                const nameInput = nameHost && (nameHost.querySelector('textarea, input'));
-                fname = (nameInput && ((nameInput.value || nameInput.textContent || '').trim())) || '';
-              }} catch(_ ){{}}
-              if (!fname) return; // rely solely on backend-provided name
-              const url = canvas.toDataURL('image/png');
-              // Trigger backend upload via hidden textbox signal
-              try {{
-                const hostEl = gradioRoot().getElementById('cie_png_upload');
-                const inputEl = hostEl && (hostEl.querySelector('textarea, input'));
-                if (inputEl) {{
-                  try {{ console.log('[CIE] Signaling backend upload for', fname); }} catch(_){{}}
-                  inputEl.value = JSON.stringify({{ filename: fname, data_url: url }});
-                  inputEl.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                  inputEl.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                  try {{ console.log('[CIE] Backend upload signal dispatched'); }} catch(_){{}}
-                }}
-              }} catch(err) {{
-                console.warn('[CIE] Failed to signal backend upload:', err);
-              }}
+              try {{ console.log('[CIE] PNG payload dispatched for upload'); }} catch(_){{}}
             }}
-          }} catch(e){{ console.error('CIE upload trigger error:', e); }}
+          }} catch (err) {{
+            console.warn('[CIE] Failed to signal backend upload:', err);
+          }}
         }});
       }}
     }};
