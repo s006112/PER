@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import logging
-from typing import Tuple
 from dotenv import load_dotenv
 from pathlib import Path
 import gradio as gr
@@ -18,12 +17,9 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # ----------------------------
 # OpenAI helper
 # ----------------------------
-def query_openai_with_prompt(prompt_content: str, pdf_parsing_text: str) -> str:
+def query_openai_with_prompt(prompt_content: str, input_text: str) -> str:
     try:
-        if "{context}" in prompt_content:
-            final_prompt = prompt_content.replace("{context}", pdf_parsing_text)
-        else:
-            final_prompt = f"{prompt_content}\n\n{pdf_parsing_text}"
+        final_prompt = f"{prompt_content}\n\n{input_text}"
 
         resp = client.chat.completions.create(
             model="gpt-4.1-mini",
@@ -38,56 +34,46 @@ def query_openai_with_prompt(prompt_content: str, pdf_parsing_text: str) -> str:
 # Upload handler
 # ----------------------------
 
-def handle_upload(pdf_text: str) -> Tuple[str, str]:
+def handle_upload(user_text: str) -> str:
     """
     Gradio callback
-    - Accept manual PDF text input
-    - Query OpenAI for PO extraction details
+    - Accept manual text input
+    - Query OpenAI to assemble the weekly summary
 
     Returns:
-      po_response_text (str), pdf_parsing_text (str)
+      weekly_summary (str)
     """
 
-    if not pdf_text or not pdf_text.strip():
-        return "Error: No text provided.", ""
-
-    pdf_parsing_text = pdf_text
+    if not user_text or not user_text.strip():
+        return "Error: No text provided."
 
     base_dir = Path(__file__).parent
     try:
-        prompt_po_str = (base_dir / "Prompt_po.txt").read_text("utf-8")
+        prompt_text = (base_dir / "prompt_w.txt").read_text("utf-8")
     except Exception as e:
-        return f"Error reading Prompt_po.txt: {e}", ""
-    openai_po_response = query_openai_with_prompt(prompt_po_str, pdf_parsing_text)
-    return openai_po_response, pdf_parsing_text
+        return f"Error reading prompt_w.txt: {e}"
+    return query_openai_with_prompt(prompt_text, user_text)
 
 # ----------------------------
 # UI
 # ----------------------------
-with gr.Blocks(title="Photometric extraction") as demo:
-    # Minimal visible controls: Text input, Submit, PO response
+with gr.Blocks(title="Weekly Summary") as demo:
+    # Minimal visible controls: Text input, Submit, Weekly summary
     with gr.Row():
         inp = gr.Textbox(
-            label="Paste PDF Text",
-            lines=12,
-            placeholder="Paste the extracted text from the PDF here...",
+            label="Paste Text",
+            lines=8,
+            placeholder="Paste the content you want to analyse...",
         )
     btn = gr.Button("Submit")
 
-    po_response_box = gr.Textbox(label="PO response", lines=14, show_copy_button=True)
+    weekly_summary_box = gr.Textbox(label="Weekly Summary", lines=14, show_copy_button=True)
 
-    pdf_parsing_box = gr.Textbox(
-        label="Input text",
-        lines=10,
-        show_copy_button=True,
-        elem_id="pdf_parsing_box",
-    )
-
-    # Wire outputs: PO response (visible) and the user-provided text (hidden but copyable)
+    # Wire outputs: Weekly summary response from OpenAI
     btn.click(
         handle_upload,
         inputs=inp,
-        outputs=[po_response_box, pdf_parsing_box],
+        outputs=weekly_summary_box,
     )
 
 if __name__ == "__main__":
