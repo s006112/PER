@@ -1,24 +1,46 @@
-• Objective: Extract and consolidate all critical content from customer purchase orders in PDF (lighting product trading context), using PyMuPDF parsed text, and produce a single continuous plain text output for human review
-• Background: POs may span multiple pages, contain tables, headers, revisions, and mixed layouts; requirement is one coherent consolidated text without page breaks
-• Style: Professional, concise, human-friendly, plain text only, optimized for readability and review
+Extract and consolidate structured purchase order data (lighting products trading context) from PyMuPDF-parsed text of customer PO PDFs into a single plain text document formatted for Odoo ERP sales order import
+• Background: PDFs may contain multiple pages, mixed tables, headers, and revisions; requirement is a coherent, page-break-free consolidated text
 • Input: PyMuPDF parsed text blocks with reading order and table structures (rows, columns, spans) if available
-• Output format (consolidated plain text):
-– Header section: Purchase Order Number, Date, Revision, Buyer, Seller, Bill To, Ship To, Consignee, Project, Quotation/Reference, Currency, Incoterms, Payment Terms, Shipment Terms, Delivery Date, Contact Details
-– Totals section: Subtotal, Discount, Tax, Freight, Grand Total
-– Line Items section as table-like aligned text: [Line No | Item Code | Description | Specifications | Quantity | UOM | Unit Price | Amount | Delivery Date | Remarks]
-– Compliance / Logistics section: Warranty, Standards, Certifications, Packaging, Labeling, Special Instructions
-– Notes or Attachments section: Additional remarks or references from the document
-• Extraction logic:
-– Consolidate across pages into one continuous flow; remove explicit page references
-– Preserve logical hierarchy; use section headings with clear spacing
-– Align tables consistently with pipes or spaces; multiline descriptions indented under same row
-– Leave placeholder when data is missing (e.g., “Payment Terms: [Not found]”)
-– Show alternates if multiple candidate values exist (e.g., “Possible Alternatives: …”)
-– Preserve original wording for ambiguous values; normalize only if unambiguous
-– If OCR required for missing text, note with “(OCR required)”
+• Output: One continuous plain text document, no metadata/JSON/XML/CSV, no page break markers, no invented data, only parsed content
+• Output format (exact order and structure):
+- Company: []
+- Customer: []
+- Salesperson: []
+- Order Date: []
+- Customer PO Number: []
+    - Order Lines/1/Product Template: []
+    - Order Lines/1/Quantity: []
+    - Order Lines/1/Delivery Date: []
+    - Order Lines/2/Product Template: []
+    - Order Lines/2/Quantity: []
+    - Order Lines/2/Delivery Date: []
+    - Order Lines/3/Product Template: []
+    - Order Lines/3/Quantity: []
+    - Order Lines/3/Delivery Date: []
+    … continue numbering sequentially for all order lines present
+
+
+• Field mapping rules for Odoo:
+Product: item name, SKU, or product code (accept aliases Item, Product Code, Part No.), long description excluded
+Quantity: numeric only (accept Qty, QTY, Quantity Ordered)
+Delivery Date: requested/required/ship/delivery date (map to commitment date in Odoo)
+Preserve field order exactly; omit fields not found; do not insert placeholders
+• Consolidation rules:
+Combine text from all pages in logical reading order
+Remove headers, footers, page numbers, and revision notes
+Normalize multi-page tables; join wrapped or spanned cells
+Maintain consistent section order regardless of original layout
+Use one blank line only between header section and order lines
+Keep all numbers, dates, and currency symbols as parsed; do not reformat
+Exclude totals, tax summaries, or non-item tables
+
+• Extraction guidance:
+Identify header fields using synonyms: Company/Supplier/Vendor; Customer/Sold To/Bill To; Salesperson/Sales Rep; Order Date/PO Date; Customer PO Number/PO No.
+Detect order line table by common headers: Item, Description, Qty, Unit Price, Tax, Discount, Delivery Date
+Exclude marketing text, terms, or attachments
+Maintain logical grouping of multi-line item descriptions
 • Output rules:
-– No metadata, JSON, XML, or CSV—only plain text
-– No page break markers; everything consolidated into one clean document
-– Maintain consistent order of sections regardless of PDF layout differences
-– Do not invent or infer missing information; show only what is parsed
-• Edge cases: multiple POs in one file → separate with “=== New Purchase Order ===”; tables spanning pages → merge seamlessly without break markers
+Plain text only, no markup, no delimiters beyond line breaks
+Fixed field order and naming as defined
+No inferred or guessed data; only parsed text
+• Style: Professional, concise, deterministic, and format-strict
