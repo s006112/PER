@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import logging
+from datetime import datetime
 from dotenv import load_dotenv
 from pathlib import Path
 import gradio as gr
@@ -39,6 +40,7 @@ def handle_upload(user_text: str) -> str:
     Gradio callback
     - Accept manual text input
     - Query OpenAI to assemble the weekly summary
+    - Persist request/response pairs to weekly.log
 
     Returns:
       weekly_summary (str)
@@ -52,7 +54,31 @@ def handle_upload(user_text: str) -> str:
         prompt_text = (base_dir / "prompt_w.txt").read_text("utf-8")
     except Exception as e:
         return f"Error reading prompt_w.txt: {e}"
-    return query_openai_with_prompt(prompt_text, user_text)
+    weekly_summary = query_openai_with_prompt(prompt_text, user_text)
+    _append_to_weekly_log(base_dir, user_text, weekly_summary)
+    return weekly_summary
+
+
+def _append_to_weekly_log(base_dir: Path, source_text: str, summary_text: str) -> None:
+    """Append the raw input and generated summary to weekly.log."""
+
+    log_path = base_dir / "weekly.log"
+    timestamp = datetime.now().isoformat(timespec="seconds")
+    entry_lines = [
+        "",
+        f"=== Submission at {timestamp} ===",
+        "[Input]",
+        source_text.rstrip(),
+        "",
+        "[Weekly Summary]",
+        summary_text.rstrip(),
+        "",
+    ]
+    try:
+        with log_path.open("a", encoding="utf-8") as log_file:
+            log_file.write("\n".join(entry_lines))
+    except Exception as exc:
+        logging.error("Failed to append to weekly.log: %s", exc)
 
 # ----------------------------
 # UI
@@ -62,7 +88,7 @@ with gr.Blocks(title="Weekly Summary") as demo:
     with gr.Row():
         inp = gr.Textbox(
             label="Paste Text",
-            lines=8,
+            lines=5,
             placeholder="Paste the content you want to analyse...",
         )
     btn = gr.Button("Submit")
