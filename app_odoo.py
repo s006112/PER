@@ -53,7 +53,6 @@ class OdooClient:
 
 
 _ODOO_CLIENT_CACHE: Optional[OdooClient] = None
-_SALE_ORDER_LINE_HAS_X_STUDIO_DELIVERY: Optional[bool] = None
 _DATE_FORMATS = [
     "%Y-%m-%d",
     "%Y/%m/%d",
@@ -222,24 +221,6 @@ def find_product_id(client: OdooClient, product_label: str) -> int:
     raise ValueError(f"Product '{product_label}' was not found in Odoo.")
 
 
-def sale_order_line_supports_x_studio_delivery_date(client: OdooClient) -> bool:
-    global _SALE_ORDER_LINE_HAS_X_STUDIO_DELIVERY
-    if _SALE_ORDER_LINE_HAS_X_STUDIO_DELIVERY is not None:
-        return _SALE_ORDER_LINE_HAS_X_STUDIO_DELIVERY
-    try:
-        fields = client.execute_kw(
-            "sale.order.line",
-            "fields_get",
-            [["x_studio_delivery_date"]],
-        )
-    except Exception as exc:
-        log.debug("fields_get for x_studio_delivery_date failed: %s", exc)
-        _SALE_ORDER_LINE_HAS_X_STUDIO_DELIVERY = False
-        return False
-    _SALE_ORDER_LINE_HAS_X_STUDIO_DELIVERY = "x_studio_delivery_date" in fields
-    return _SALE_ORDER_LINE_HAS_X_STUDIO_DELIVERY
-
-
 def create_demo_sale_order(settings: DemoSettings) -> Tuple[int, dict[str, Any]]:
     client = get_odoo_client()
     company_id = find_company_id(client, settings.company)
@@ -253,13 +234,11 @@ def create_demo_sale_order(settings: DemoSettings) -> Tuple[int, dict[str, Any]]
         "product_id": product_id,
         "product_uom_qty": quantity,
     }
-    if settings.x_studio_delivery_date and sale_order_line_supports_x_studio_delivery_date(client):
+    if settings.x_studio_delivery_date:
         order_line["x_studio_delivery_date"] = normalize_odoo_datetime(
             settings.x_studio_delivery_date,
             "Delivery Date",
         )
-    elif settings.x_studio_delivery_date:
-        log.info("Skipping x_studio_delivery_date because the field is not available on sale.order.line.")
 
     vals = {
         "partner_id": customer_id,
