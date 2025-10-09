@@ -53,19 +53,6 @@ class OdooClient:
 
 
 _ODOO_CLIENT_CACHE: Optional[OdooClient] = None
-_SALE_ORDER_CUSTOMER_PO_FIELD: Optional[str] = None
-_CUSTOMER_PO_FIELD_CANDIDATES = [
-    "x_studio_customer_po_number",
-    "x_studio_customer_po",
-    "x_customer_po_number",
-    "x_customer_po",
-    "client_order_ref",
-]
-_CUSTOMER_PO_LABEL_TARGETS = {
-    "customer po number",
-    "customer po",
-    "customer purchase order",
-}
 _DATE_FORMATS = [
     "%Y-%m-%d",
     "%Y/%m/%d",
@@ -82,21 +69,18 @@ _DATE_FORMATS = [
 
 class DemoSettings:
     """
-    Simple container for the demo sale order data. Customize via .env variables:
-      ODOO_DEMO_COMPANY, ODOO_DEMO_CUSTOMER, ODOO_DEMO_SALESPERSON,
-      ODOO_DEMO_ORDER_DATE, ODOO_DEMO_CUSTOMER_PO, ODOO_DEMO_PRODUCT,
-      ODOO_DEMO_QUANTITY, ODOO_DEMO_DELIVERY_DATE.
+    Simple container for the demo sale order data using fixed demo values.
     """
 
     def __init__(self) -> None:
-        self.company = os.getenv("ODOO_DEMO_COMPANY", "Ampco Products Limited")
-        self.customer = os.getenv("ODOO_DEMO_CUSTOMER", "Focal Point, LLC")
-        self.salesperson = os.getenv("ODOO_DEMO_SALESPERSON", "Kenny Ng")
-        self.order_date = os.getenv("ODOO_DEMO_ORDER_DATE", "2024-12-31")
-        self.customer_po = os.getenv("ODOO_DEMO_CUSTOMER_PO", "DEMO-PO-001")
-        self.product = os.getenv("ODOO_DEMO_PRODUCT", "A36773-04")
-        self.quantity = os.getenv("ODOO_DEMO_QUANTITY", "12")
-        self.x_studio_delivery_date = os.getenv("ODOO_DEMO_DELIVERY_DATE", "2025-01-15")
+        self.company = "Ampco Products Limited"
+        self.customer = "Focal Point, LLC"
+        self.salesperson = "Kenny Ng"
+        self.order_date = "2024-12-31"
+        self.x_studio_customer_po_number = "DEMO-PO-001"
+        self.product = "A36773-04"
+        self.quantity = "12"
+        self.x_studio_delivery_date = "2025-01-15"
 
 
 def load_odoo_config() -> OdooConfig:
@@ -234,54 +218,8 @@ def find_product_id(client: OdooClient, product_label: str) -> int:
     raise ValueError(f"Product '{product_label}' was not found in Odoo.")
 
 
-def get_sale_order_customer_po_field(client: OdooClient) -> str:
-    global _SALE_ORDER_CUSTOMER_PO_FIELD
-    if _SALE_ORDER_CUSTOMER_PO_FIELD:
-        return _SALE_ORDER_CUSTOMER_PO_FIELD
-
-    try:
-        fields = client.execute_kw(
-            "sale.order",
-            "fields_get",
-            [],
-            {"attributes": ["string"]},
-        )
-    except Exception as exc:
-        raise RuntimeError(f"Unable to inspect sale.order fields for Customer PO: {exc}") from exc
-
-    override = os.getenv("ODOO_CUSTOMER_PO_FIELD")
-    if override:
-        desired = override.strip()
-        if desired not in fields:
-            raise RuntimeError(
-                f"Configured Customer PO field '{desired}' does not exist on sale.order."
-            )
-        _SALE_ORDER_CUSTOMER_PO_FIELD = desired
-        return desired
-
-    for field_name, meta in fields.items():
-        label = (meta.get("string") or "").strip().lower()
-        if label in _CUSTOMER_PO_LABEL_TARGETS:
-            _SALE_ORDER_CUSTOMER_PO_FIELD = field_name
-            log.debug("Detected sale.order Customer PO field by label '%s': %s", label, field_name)
-            return field_name
-
-    for candidate in _CUSTOMER_PO_FIELD_CANDIDATES:
-        if candidate in fields:
-            _SALE_ORDER_CUSTOMER_PO_FIELD = candidate
-            log.debug("Detected sale.order Customer PO field: %s", candidate)
-            return candidate
-
-    raise RuntimeError(
-        "Unable to locate a Customer PO field on sale.order. "
-        f"Tried: {', '.join(_CUSTOMER_PO_FIELD_CANDIDATES)}. "
-        "Set ODOO_CUSTOMER_PO_FIELD to the desired field name."
-    )
-
-
 def create_demo_sale_order(settings: DemoSettings) -> Tuple[int, dict[str, Any]]:
     client = get_odoo_client()
-    po_field = get_sale_order_customer_po_field(client)
     company_id = find_company_id(client, settings.company)
     customer_id = find_or_create_customer_id(client, settings.customer)
     salesperson_id = find_salesperson_id(client, settings.salesperson)
@@ -304,25 +242,23 @@ def create_demo_sale_order(settings: DemoSettings) -> Tuple[int, dict[str, Any]]
         "company_id": company_id,
         "user_id": salesperson_id,
         "date_order": order_date_iso,
+        "x_studio_customer_po_number": settings.x_studio_customer_po_number,
         # Build one2many commands with (0, 0, values) per XML-RPC protocol (contentReference[oaicite:3])
         "order_line": [(0, 0, order_line)],
     }
-    if settings.customer_po:
-        vals[po_field] = settings.customer_po
-        if po_field != "client_order_ref":
-            vals["client_order_ref"] = settings.customer_po
 
     # Call create() via execute_kw to obtain the new order ID (contentReference[oaicite:6])
     order_id = client.execute_kw("sale.order", "create", [vals])
-    log.info("Created demo sale.order %s (PO: %s)", order_id, settings.customer_po)
+    log.info(
+        "Created demo sale.order %s (PO: %s)",
+        order_id,
+        settings.x_studio_customer_po_number,
+    )
 
-    read_fields = ["name", "order_line", po_field]
-    if po_field != "client_order_ref":
-        read_fields.append("client_order_ref")
     order_data = client.execute_kw(
         "sale.order",
         "read",
-        [[order_id], read_fields],
+        [[order_id], ["name", "order_line"]],
     )
     log.info("Order %s readback: %s", order_id, order_data)
     return order_id, order_data[0] if order_data else {}
