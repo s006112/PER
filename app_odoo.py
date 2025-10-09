@@ -53,20 +53,6 @@ class OdooClient:
 
 
 _ODOO_CLIENT_CACHE: Optional[OdooClient] = None
-_DATE_FORMATS = [
-    "%Y-%m-%d",
-    "%Y/%m/%d",
-    "%Y-%m-%d %H:%M",
-    "%Y-%m-%d %H:%M:%S",
-    "%m/%d/%Y",
-    "%d/%m/%Y",
-    "%m/%d/%y",
-    "%d/%m/%y",
-    "%m-%d-%Y",
-    "%d-%m-%Y",
-]
-
-
 class DemoSettings:
     """
     Simple container for the demo sale order data using fixed demo values.
@@ -122,18 +108,17 @@ def normalize_odoo_datetime(value: str, field_name: str) -> str:
     normalized = cleaned.replace("Z", "+00:00")
     try:
         dt = datetime.fromisoformat(normalized)
-        if dt.tzinfo:
-            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-        # Date/datetime fields should be sent as strings (contentReference[oaicite:1])
-        return dt.strftime("%Y-%m-%d %H:%M:%S")
     except ValueError:
-        for fmt in _DATE_FORMATS:
-            try:
-                dt = datetime.strptime(cleaned, fmt)
-                return dt.strftime("%Y-%m-%d %H:%M:%S")
-            except ValueError:
-                continue
-    raise ValueError(f"Unable to parse {field_name} value '{value}' into an ISO datetime string.")
+        try:
+            dt = datetime.strptime(cleaned, "%m/%d/%Y")
+        except ValueError as exc:
+            raise ValueError(
+                f"Unable to parse {field_name} value '{value}' into an ISO datetime string.",
+            ) from exc
+    if dt.tzinfo:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    # Date/datetime fields should be sent as strings (contentReference[oaicite:1])
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def parse_quantity(raw_value: str) -> float:
@@ -156,18 +141,16 @@ def find_company_id(client: OdooClient, name: str) -> int:
     return result[0]
 
 
-def find_or_create_customer_id(client: OdooClient, name: str) -> int:
+def find_customer_id(client: OdooClient, name: str) -> int:
     result = client.execute_kw(
         "res.partner",
         "search",
         [[["name", "=", name]]],
         {"limit": 1},
     )
-    if result:
-        return result[0]
-    log.info("Customer '%s' not found; creating new partner.", name)
-    customer_id = client.execute_kw("res.partner", "create", [[{"name": name}]])
-    return customer_id
+    if not result:
+        raise ValueError(f"Customer '{name}' was not found in Odoo.")
+    return result[0]
 
 
 def find_salesperson_id(client: OdooClient, name: str) -> int:
@@ -221,9 +204,9 @@ def find_product_id(client: OdooClient, product_label: str) -> int:
 def create_demo_sale_order(settings: DemoSettings) -> Tuple[int, dict[str, Any]]:
     client = get_odoo_client()
     company_id = find_company_id(client, settings.company)
-    customer_id = find_or_create_customer_id(client, settings.customer)
+    customer_id = find_customer_id(client, settings.customer)
     salesperson_id = find_salesperson_id(client, settings.salesperson)
-    order_date_iso = normalize_odoo_datetime(settings.order_date, "Order Date")
+    order_date_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     quantity = parse_quantity(settings.quantity)
 
     product_id = find_product_id(client, settings.product)
