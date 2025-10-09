@@ -53,7 +53,7 @@ class OdooClient:
 
 
 _ODOO_CLIENT_CACHE: Optional[OdooClient] = None
-_SALE_ORDER_LINE_HAS_COMMITMENT: Optional[bool] = None
+_SALE_ORDER_LINE_HAS_X_STUDIO_DELIVERY: Optional[bool] = None
 _DATE_FORMATS = [
     "%Y-%m-%d",
     "%Y/%m/%d",
@@ -84,7 +84,7 @@ class DemoSettings:
         self.customer_po = os.getenv("ODOO_DEMO_CUSTOMER_PO", "DEMO-PO-001")
         self.product = os.getenv("ODOO_DEMO_PRODUCT", "A36773-04")
         self.quantity = os.getenv("ODOO_DEMO_QUANTITY", "12")
-        self.delivery_date = os.getenv("ODOO_DEMO_DELIVERY_DATE", "2025-01-15")
+        self.x_studio_delivery_date = os.getenv("ODOO_DEMO_DELIVERY_DATE", "2025-01-15")
 
 
 def load_odoo_config() -> OdooConfig:
@@ -222,22 +222,22 @@ def find_product_id(client: OdooClient, product_label: str) -> int:
     raise ValueError(f"Product '{product_label}' was not found in Odoo.")
 
 
-def sale_order_line_supports_commitment_date(client: OdooClient) -> bool:
-    global _SALE_ORDER_LINE_HAS_COMMITMENT
-    if _SALE_ORDER_LINE_HAS_COMMITMENT is not None:
-        return _SALE_ORDER_LINE_HAS_COMMITMENT
+def sale_order_line_supports_x_studio_delivery_date(client: OdooClient) -> bool:
+    global _SALE_ORDER_LINE_HAS_X_STUDIO_DELIVERY
+    if _SALE_ORDER_LINE_HAS_X_STUDIO_DELIVERY is not None:
+        return _SALE_ORDER_LINE_HAS_X_STUDIO_DELIVERY
     try:
         fields = client.execute_kw(
             "sale.order.line",
             "fields_get",
-            [["commitment_date"]],
+            [["x_studio_delivery_date"]],
         )
     except Exception as exc:
-        log.debug("fields_get for commitment_date failed: %s", exc)
-        _SALE_ORDER_LINE_HAS_COMMITMENT = False
+        log.debug("fields_get for x_studio_delivery_date failed: %s", exc)
+        _SALE_ORDER_LINE_HAS_X_STUDIO_DELIVERY = False
         return False
-    _SALE_ORDER_LINE_HAS_COMMITMENT = "commitment_date" in fields
-    return _SALE_ORDER_LINE_HAS_COMMITMENT
+    _SALE_ORDER_LINE_HAS_X_STUDIO_DELIVERY = "x_studio_delivery_date" in fields
+    return _SALE_ORDER_LINE_HAS_X_STUDIO_DELIVERY
 
 
 def create_demo_sale_order(settings: DemoSettings) -> Tuple[int, dict[str, Any]]:
@@ -253,13 +253,13 @@ def create_demo_sale_order(settings: DemoSettings) -> Tuple[int, dict[str, Any]]
         "product_id": product_id,
         "product_uom_qty": quantity,
     }
-    if settings.delivery_date and sale_order_line_supports_commitment_date(client):
-        order_line["commitment_date"] = normalize_odoo_datetime(
-            settings.delivery_date,
+    if settings.x_studio_delivery_date and sale_order_line_supports_x_studio_delivery_date(client):
+        order_line["x_studio_delivery_date"] = normalize_odoo_datetime(
+            settings.x_studio_delivery_date,
             "Delivery Date",
         )
-    elif settings.delivery_date:
-        log.info("Skipping commitment_date because the field is not available on sale.order.line.")
+    elif settings.x_studio_delivery_date:
+        log.info("Skipping x_studio_delivery_date because the field is not available on sale.order.line.")
 
     vals = {
         "partner_id": customer_id,
