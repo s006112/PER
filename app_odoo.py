@@ -64,9 +64,23 @@ class DemoSettings:
         self.salesperson = "Kenny Ng"
         self.order_date = "2024-12-31"
         self.x_studio_customer_po_number = "DEMO-PO-001"
-        self.product = "A36773-04"
-        self.quantity = "12"
-        self.x_studio_delivery_date = "2025-01-15"
+        self.order_lines = [
+            {
+                "product": "A36773-04",
+                "quantity": "12",
+                "x_studio_delivery_date": "2025-01-15",
+            },
+            {
+                "product": "694465",
+                "quantity": "800",
+                "x_studio_delivery_date": "2025-02-10",
+            },
+            {
+                "product": "443004",
+                "quantity": "1500",
+                "x_studio_delivery_date": "2025-03-05",
+            },
+        ]
 
 
 def load_odoo_config() -> OdooConfig:
@@ -207,18 +221,24 @@ def create_demo_sale_order(settings: DemoSettings) -> Tuple[int, dict[str, Any]]
     customer_id = find_customer_id(client, settings.customer)
     salesperson_id = find_salesperson_id(client, settings.salesperson)
     order_date_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    quantity = parse_quantity(settings.quantity)
+    order_lines = []
+    for index, line in enumerate(settings.order_lines, start=1):
+        quantity = parse_quantity(line["quantity"])
+        product_id = find_product_id(client, line["product"])
+        order_line_values = {
+            "product_id": product_id,
+            "product_uom_qty": quantity,
+        }
+        delivery_date = line.get("x_studio_delivery_date")
+        if delivery_date:
+            order_line_values["x_studio_delivery_date"] = normalize_odoo_datetime(
+                delivery_date,
+                f"Delivery Date (line {index})",
+            )
+        order_lines.append((0, 0, order_line_values))
 
-    product_id = find_product_id(client, settings.product)
-    order_line = {
-        "product_id": product_id,
-        "product_uom_qty": quantity,
-    }
-    if settings.x_studio_delivery_date:
-        order_line["x_studio_delivery_date"] = normalize_odoo_datetime(
-            settings.x_studio_delivery_date,
-            "Delivery Date",
-        )
+    if not order_lines:
+        raise ValueError("DemoSettings defines no order lines to import.")
 
     vals = {
         "partner_id": customer_id,
@@ -227,7 +247,7 @@ def create_demo_sale_order(settings: DemoSettings) -> Tuple[int, dict[str, Any]]
         "date_order": order_date_iso,
         "x_studio_customer_po_number": settings.x_studio_customer_po_number,
         # Build one2many commands with (0, 0, values) per XML-RPC protocol (contentReference[oaicite:3])
-        "order_line": [(0, 0, order_line)],
+        "order_line": order_lines,
     }
 
     # Call create() via execute_kw to obtain the new order ID (contentReference[oaicite:6])
