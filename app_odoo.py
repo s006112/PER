@@ -62,7 +62,6 @@ class DemoSettings:
         self.company = "Ampco Products Limited"
         self.customer = "Focal Point, LLC"
         self.salesperson = "Kenny Ng"
-        self.order_date = "2024-12-31"
         self.x_studio_customer_po_number = "DEMO-PO-001"
         self.order_lines = [
             {

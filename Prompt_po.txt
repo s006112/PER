@@ -2,23 +2,29 @@ Extract and consolidate structured purchase order data (lighting products tradin
 • Background: PDFs may contain multiple pages, mixed tables, headers, and revisions; requirement is a coherent, page-break-free consolidated text
 • Input: PyMuPDF parsed text blocks with reading order and table structures (rows, columns, spans) if available
 • Output: One continuous plain text document, no metadata/JSON/XML/CSV, no page break markers, no invented data, only parsed content
-• Output format (exact order and structure):
-- Company: []
-- Customer: []
-- Salesperson: []
-- Order Date: []
-- Customer PO Number: []
-    - Order Lines/1/Product Template: []
-    - Order Lines/1/Quantity: []
-    - Order Lines/1/Delivery Date: []
-    - Order Lines/2/Product Template: []
-    - Order Lines/2/Quantity: []
-    - Order Lines/2/Delivery Date: []
-    - Order Lines/3/Product Template: []
-    - Order Lines/3/Quantity: []
-    - Order Lines/3/Delivery Date: []
-    … continue numbering sequentially for all order lines present
-
+• Output format (exact order and structure, example in "" for illustration only):
+    self.company = "Ampco Products Limited"
+    self.customer = "Focal Point, LLC"
+    self.salesperson = "Kenny Ng"
+    self.x_studio_customer_po_number = "PO-001"
+    self.order_lines = [
+        {
+            "product": "A36773-04",
+            "quantity": "12",
+            "x_studio_delivery_date": "2025-01-15",
+        },
+        {
+            "product": "694465",
+            "quantity": "800",
+            "x_studio_delivery_date": "2025-02-10",
+        },
+        {
+            "product": "443004",
+            "quantity": "1500",
+            "x_studio_delivery_date": "2025-03-05",
+        },
+    ]
+    … continue numbering sequentially for all product present
 
 • Field mapping rules for Odoo:
 Product: item name, SKU, or product code (accept aliases Item, Product Code, Part No.), long description excluded
