@@ -61,21 +61,21 @@ class DemoSettings:
     def __init__(self) -> None:
         self.company = "Ampco Products Limited"
         self.customer = "Focal Point, LLC"
-        self.salesperson = "Kenny Ng"
+        self.salesperson = "Kenn"
         self.x_studio_customer_po_number = "DEMO-PO-001"
         self.order_lines = [
             {
-                "product": "A36773-04",
+                "product": "AFE34d",
                 "quantity": "12",
                 "x_studio_delivery_date": "2025-01-15",
             },
             {
-                "product": "694465",
+                "product": "61235",
                 "quantity": "800",
                 "x_studio_delivery_date": "2025-02-10",
             },
             {
-                "product": "443004",
+                "product": "kteb-240",
                 "quantity": "1500",
                 "x_studio_delivery_date": "2025-03-05",
             },
@@ -142,88 +142,171 @@ def parse_quantity(raw_value: str) -> float:
     return float(match.group())
 
 
-def find_company_id(client: OdooClient, name: str) -> int:
-    result = client.execute_kw(
-        "res.company",
-        "search",
-        [[["name", "=", name]]],
-        {"limit": 1},
-    )
-    if not result:
-        raise ValueError(f"Company '{name}' was not found in Odoo.")
-    return result[0]
+_NORMALIZE_PATTERN = re.compile(r"[^0-9a-z]+")
 
 
-def find_customer_id(client: OdooClient, name: str) -> int:
-    result = client.execute_kw(
-        "res.partner",
-        "search",
-        [[["name", "=", name]]],
-        {"limit": 1},
-    )
-    if not result:
-        raise ValueError(f"Customer '{name}' was not found in Odoo.")
-    return result[0]
+def _normalize_value(raw_value: str) -> str:
+    return _NORMALIZE_PATTERN.sub("", raw_value.lower())
 
 
-def find_salesperson_id(client: OdooClient, name: str) -> int:
-    result = client.execute_kw(
-        "res.users",
-        "search",
-        [[["name", "=", name]]],
-        {"limit": 1},
-    )
-    if not result:
-        raise ValueError(f"Salesperson '{name}' was not found in Odoo.")
-    return result[0]
+def _select_candidate(candidates: list[tuple[int, str, str]]) -> int:
+    return min(candidates, key=lambda item: (len(item[1]), item[1], item[0]))[0]
 
 
-def find_product_id(client: OdooClient, product_label: str) -> int:
-    candidates = [product_label.strip()]
-    tokens = product_label.split()
-    if tokens:
-        first_token = tokens[0]
-        if first_token and first_token not in candidates:
-            candidates.append(first_token)
-    if "(" in product_label and ")" in product_label:
-        inner = product_label.split("(", 1)[1].split(")", 1)[0].strip()
-        if inner and inner not in candidates:
-            candidates.append(inner)
+def _fetch_candidates_for_field(
+    client: OdooClient,
+    model: str,
+    field: str,
+    input_value: str,
+    limit: int,
+) -> list[tuple[int, str, str]]:
+    stripped_input = input_value.strip()
+    candidates: list[tuple[int, str, str]] = []
+    seen_ids: set[int] = set()
 
-    for candidate in candidates:
-        for field in ("default_code", "name"):
-            domain = [[field, "=", candidate]]
-            result = client.execute_kw(
-                "product.product",
-                "search",
-                [domain],
-                {"limit": 1},
-            )
-            if result:
-                return result[0]
-        # fall back to case-insensitive match if no exact match
-        domain = [["name", "ilike", candidate]]
-        result = client.execute_kw(
-            "product.product",
-            "search",
-            [domain],
-            {"limit": 1},
+    def add_records(records: list[dict[str, Any]]) -> bool:
+        for record in records:
+            record_id = int(record["id"])
+            if record_id in seen_ids:
+                continue
+            raw_value = record.get(field)
+            if not raw_value:
+                continue
+            normalized_value = _normalize_value(str(raw_value))
+            if not normalized_value:
+                continue
+            candidates.append((record_id, normalized_value, str(raw_value)))
+            seen_ids.add(record_id)
+            if len(candidates) >= limit:
+                return True
+        return False
+
+    if stripped_input:
+        exact_records = client.execute_kw(
+            model,
+            "search_read",
+            [[[field, "=", stripped_input]]],
+            {"fields": [field], "limit": limit},
         )
-        if result:
-            return result[0]
-    raise ValueError(f"Product '{product_label}' was not found in Odoo.")
+        if add_records(exact_records):
+            return candidates
+
+        for prefix_length in range(len(stripped_input), 0, -1):
+            prefix = stripped_input[:prefix_length]
+            prefix_records = client.execute_kw(
+                model,
+                "search_read",
+                [[[field, "ilike", f"{prefix}%"]]],
+                {"fields": [field], "limit": limit},
+            )
+            if add_records(prefix_records):
+                return candidates
+        if candidates:
+            return candidates
+
+    normalized_input = _normalize_value(input_value)
+    if normalized_input:
+        wildcard = f"%{'%'.join(normalized_input)}%"
+        wildcard_records = client.execute_kw(
+            model,
+            "search_read",
+            [[[field, "ilike", wildcard]]],
+            {"fields": [field], "limit": limit},
+        )
+        if add_records(wildcard_records):
+            return candidates
+        if candidates:
+            return candidates
+
+    if stripped_input:
+        fuzzy_records = client.execute_kw(
+            model,
+            "search_read",
+            [[[field, "ilike", stripped_input]]],
+            {"fields": [field], "limit": limit},
+        )
+        add_records(fuzzy_records)
+
+    return candidates
+
+
+def find_id(
+    client: OdooClient,
+    model: str,
+    input_value: str,
+    *,
+    fields: list[str],
+    limit: int = 100,
+) -> int:
+    """
+    Resolve an Odoo record ID using progressive prefix filtering across the given fields.
+
+    The search starts with candidates fetched via ``search_read`` for each field (in order),
+    then filters them by progressively extending the normalized input prefix. If a normalized
+    exact match is found for any candidate, its ID is returned immediately. Otherwise, the
+    winner is chosen deterministically using shortest normalized length, lexicographical order,
+    then lowest record ID.
+    """
+    if not fields:
+        raise ValueError("At least one field must be provided to locate record IDs.")
+    if not input_value:
+        raise ValueError("Input value is empty; unable to determine record ID.")
+    normalized_input = _normalize_value(input_value)
+    if not normalized_input:
+        raise ValueError(f"Input '{input_value}' is invalid after normalization.")
+
+    for field in fields:
+        candidates = _fetch_candidates_for_field(
+            client,
+            model,
+            field,
+            input_value,
+            limit,
+        )
+
+        if not candidates:
+            continue
+
+        for candidate in candidates:
+            if candidate[1] == normalized_input:
+                return candidate[0]
+
+        current_set = candidates
+        last_non_empty: Optional[list[tuple[int, str, str]]] = None
+        for index in range(1, len(normalized_input) + 1):
+            prefix = normalized_input[:index]
+            filtered = [candidate for candidate in current_set if candidate[1].startswith(prefix)]
+            if filtered:
+                last_non_empty = filtered
+                current_set = filtered
+            else:
+                if last_non_empty:
+                    return _select_candidate(last_non_empty)
+                break
+        else:
+            if current_set:
+                return _select_candidate(current_set)
+            if last_non_empty:
+                return _select_candidate(last_non_empty)
+
+    raise ValueError(f"No '{model}' record matches '{input_value}'.")
 
 
 def create_demo_sale_order(settings: DemoSettings) -> Tuple[int, dict[str, Any]]:
     client = get_odoo_client()
-    company_id = find_company_id(client, settings.company)
-    customer_id = find_customer_id(client, settings.customer)
-    salesperson_id = find_salesperson_id(client, settings.salesperson)
+    company_id = find_id(client, "res.company", settings.company, fields=["name"])
+    customer_id = find_id(client, "res.partner", settings.customer, fields=["name"])
+    salesperson_id = find_id(client, "res.users", settings.salesperson, fields=["name"])
     order_date_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     order_lines = []
     for index, line in enumerate(settings.order_lines, start=1):
         quantity = parse_quantity(line["quantity"])
-        product_id = find_product_id(client, line["product"])
+        product_id = find_id(
+            client,
+            "product.product",
+            line["product"],
+            fields=["default_code", "name"],
+        )
         order_line_values = {
             "product_id": product_id,
             "product_uom_qty": quantity,
