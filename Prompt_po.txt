@@ -39,6 +39,7 @@ Extraction guidance:
 Identify header fields using synonyms: Company/Supplier/Vendor; Customer/Sold To/Bill To; Salesperson/Sales Rep; Order Date/PO Date; Customer PO Number/PO No.
 Standardize Date format into YYYY-MM-DD.
 Remove symbol * in the content of "product", e.g. *287LC7 should be 287LC7
+No missing field are allowed, all information must be avaliable in parsed text blocks
 
 Output rules:
 Plain text only, no markup, no delimiters beyond line breaks
