@@ -10,7 +10,7 @@ import gradio as gr
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from app_odoo import create_sale_order_from_text
+from app_odoo import attach_pdf_to_sale_order, create_sale_order_from_text
 
 load_dotenv()
 
@@ -92,7 +92,7 @@ def handle_upload(file_path: str, salesperson: str) -> Tuple[str, str, str]:
     except Exception as e:
         return f"Error reading Prompt_po.txt: {e}", "", ""
     openai_po_response = query_openai_with_prompt(prompt_po_str, pdf_parsing_text)
-    sale_order_message = ""
+    import_messages: list[str] = []
     if openai_po_response and not openai_po_response.startswith("Error"):
         lines_without_salesperson = [
             line for line in openai_po_response.splitlines() if not line.strip().startswith("self.salesperson")
@@ -102,18 +102,43 @@ def handle_upload(file_path: str, salesperson: str) -> Tuple[str, str, str]:
         header_line = f"self.salesperson = {salesperson_literal}"
         openai_po_response = f"{header_line}\n{sanitized_response}" if sanitized_response else header_line
         try:
-            order_id, _ = create_sale_order_from_text(openai_po_response)
-            sale_order_message = f"Created Odoo sale order ID: {order_id}"
+            order_id, order_data = create_sale_order_from_text(openai_po_response)
+            creation_message = f"Created Odoo sale order ID: {order_id}"
+            import_messages.append(creation_message)
+
+            order_name = ""
+            if isinstance(order_data, dict):
+                order_name = str(order_data.get("name") or "").strip()
+            if not order_name:
+                log.error("Missing sale order name for order %s; skipping attachment.", order_id)
+                import_messages.append("Attachment skipped: missing sale order name from Odoo response.")
+            else:
+                try:
+                    attachment_id = attach_pdf_to_sale_order(
+                        sale_order_identifier=order_name,
+                        pdf_path=file_path,
+                        note_body="Attached customer PO",
+                    )
+                    import_messages.append(f"Attached PDF as ir.attachment {attachment_id}")
+                except Exception as attach_exc:
+                    log.exception(
+                        "Failed to attach PDF '%s' to sale order %s: %s",
+                        file_path,
+                        order_name,
+                        attach_exc,
+                    )
+                    import_messages.append(f"Attachment failed: {attach_exc}")
         except Exception as exc:
             log.exception("Odoo sale order creation failed: %s", exc)
-            sale_order_message = f"Odoo sale order creation failed: {exc}"
+            import_messages.append(f"Odoo sale order creation failed: {exc}")
 
-    if sale_order_message:
-        pdf_output = f"{pdf_parsing_text}\n\n{sale_order_message}" if pdf_parsing_text else sale_order_message
+    import_log_message = "\n".join(import_messages)
+    if import_log_message:
+        pdf_output = f"{pdf_parsing_text}\n\n{import_log_message}" if pdf_parsing_text else import_log_message
     else:
         pdf_output = pdf_parsing_text
 
-    return openai_po_response, pdf_output, sale_order_message
+    return openai_po_response, pdf_output, import_log_message
 
 # ----------------------------
 # UI

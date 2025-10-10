@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import base64
 import logging
 import os
 import re
@@ -371,7 +372,72 @@ def create_sale_order_from_text(po_response: str) -> tuple[int, dict[str, Any]]:
     return create_sale_order(po_data)
 
 
+def attach_pdf_to_sale_order(
+    sale_order_identifier: str,
+    pdf_path: str,
+    note_body: str = "Attached customer PO",
+) -> int:
+    client = get_odoo_client()
+    if not sale_order_identifier or not sale_order_identifier.strip():
+        raise ValueError("Sale order identifier must be provided.")
+    order_id = find_id(client, "sale.order", sale_order_identifier, fields=["name"])
+
+    if not pdf_path:
+        raise ValueError("PDF path is empty.")
+    if not os.path.isfile(pdf_path):
+        raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+    if not pdf_path.lower().endswith(".pdf"):
+        raise ValueError(f"Attachment must be a PDF file: {pdf_path}")
+
+    try:
+        with open(pdf_path, "rb") as pdf_file:
+            pdf_bytes = pdf_file.read()
+    except FileNotFoundError:
+        raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+
+    if not pdf_bytes:
+        raise ValueError(f"PDF file '{pdf_path}' is empty.")
+
+    encoded_pdf = base64.b64encode(pdf_bytes).decode("ascii")
+    attachment_vals = {
+        "name": os.path.basename(pdf_path),
+        "type": "binary",
+        "datas": encoded_pdf,
+        "res_model": "sale.order",
+        "res_id": order_id,
+        "mimetype": "application/pdf",
+    }
+
+    try:
+        attachment_result = client.execute_kw("ir.attachment", "create", [attachment_vals])
+        if isinstance(attachment_result, list):
+            if not attachment_result:
+                raise RuntimeError("Odoo returned an empty attachment id list.")
+            attachment_id = int(attachment_result[0])
+        else:
+            attachment_id = int(attachment_result)
+        client.execute_kw(
+            "sale.order",
+            "message_post",
+            [[order_id]],
+            {"body": note_body, "attachment_ids": [attachment_id]},
+        )
+    except xmlrpc_client.Fault as exc:
+        log.error("Failed attaching PDF to sale.order %s: %s", sale_order_identifier, exc)
+        raise RuntimeError(f"Odoo error while attaching PDF: {exc.faultString}") from exc
+
+    log.info(
+        "Attached PDF '%s' to sale.order %s (order_id=%s, attachment_id=%s)",
+        os.path.basename(pdf_path),
+        sale_order_identifier,
+        order_id,
+        attachment_id,
+    )
+    return attachment_id
+
+
 __all__ = [
+    "attach_pdf_to_sale_order",
     "create_sale_order",
     "create_sale_order_from_text",
     "parse_po_response_text",
