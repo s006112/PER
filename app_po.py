@@ -19,6 +19,7 @@ _LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=getattr(logging, _LOG_LEVEL, logging.INFO), format="%(levelname)s: %(message)s")
 log = logging.getLogger("app")
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+_SHOW_PO_TEXTBOXES = os.getenv("PO_SHOW_TEXTBOXES", "true").strip().lower() not in {"0", "false", "no", "off"}
 
 # ----------------------------
 # PDF parsing
@@ -60,7 +61,7 @@ def query_openai_with_prompt(prompt_content: str, pdf_parsing_text: str) -> str:
 # Upload handler
 # ----------------------------
 
-def handle_upload(file_path: str, salesperson: str) -> Tuple[str, str]:
+def handle_upload(file_path: str, salesperson: str) -> Tuple[str, str, str]:
     """
     Gradio callback
     - Read PDF path, extract text
@@ -68,28 +69,28 @@ def handle_upload(file_path: str, salesperson: str) -> Tuple[str, str]:
     - Inject the manually provided salesperson name into the response
 
     Returns:
-      po_response_text (str), pdf_parsing_text (str)
+      po_response_text (str), pdf_parsing_text (str), import_log (str)
     """
 
     if not salesperson or not salesperson.strip():
-        return "Error: Sales person is required.", ""
+        return "Error: Sales person is required.", "", ""
 
     salesperson_value = salesperson.strip()
     if not file_path or not os.path.isfile(file_path):
-        return "Error: No file found.", ""
+        return "Error: No file found.", "", ""
 
     with open(file_path, "rb") as f:
         data = f.read()
 
     _engine, pdf_parsing_text = extract_pdf_text_from_bytes(data)
     if not pdf_parsing_text:
-        return "Error: PDF parsing failed.", ""
+        return "Error: PDF parsing failed.", "", ""
 
     base_dir = Path(__file__).parent
     try:
         prompt_po_str = (base_dir / "Prompt_po.txt").read_text("utf-8")
     except Exception as e:
-        return f"Error reading Prompt_po.txt: {e}", ""
+        return f"Error reading Prompt_po.txt: {e}", "", ""
     openai_po_response = query_openai_with_prompt(prompt_po_str, pdf_parsing_text)
     sale_order_message = ""
     if openai_po_response and not openai_po_response.startswith("Error"):
@@ -112,7 +113,7 @@ def handle_upload(file_path: str, salesperson: str) -> Tuple[str, str]:
     else:
         pdf_output = pdf_parsing_text
 
-    return openai_po_response, pdf_output
+    return openai_po_response, pdf_output, sale_order_message
 
 # ----------------------------
 # UI
@@ -124,20 +125,23 @@ with gr.Blocks(title="Photometric extraction") as demo:
         salesperson_input = gr.Textbox(label="Sales person", lines=1, placeholder="Enter sales person name")
     btn = gr.Button("Submit")
 
-    po_response_box = gr.Textbox(label="PO response", lines=14, show_copy_button=True)
+    po_response_box = gr.Textbox(label="PO response", lines=14, show_copy_button=True, visible=_SHOW_PO_TEXTBOXES)
 
     pdf_parsing_box = gr.Textbox(
         label="PDF parsing",
         lines=10,
         show_copy_button=True,
         elem_id="pdf_parsing_box",
+        visible=_SHOW_PO_TEXTBOXES,
     )
 
-    # Wire outputs: PO response (visible) and raw PDF parsing text (hidden but copyable)
+    import_log_box = gr.Textbox(label="Import Log", lines=2, interactive=False)
+
+    # Wire outputs: PO response (visible), raw PDF parsing text (hidden but copyable), and import log
     btn.click(
         handle_upload,
         inputs=[inp, salesperson_input],
-        outputs=[po_response_box, pdf_parsing_box],
+        outputs=[po_response_box, pdf_parsing_box, import_log_box],
     )
 
 if __name__ == "__main__":
