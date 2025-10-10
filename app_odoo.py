@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import ast
 import logging
 import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Optional
 from xmlrpc import client as xmlrpc_client
 
 from dotenv import load_dotenv
@@ -53,33 +54,6 @@ class OdooClient:
 
 
 _ODOO_CLIENT_CACHE: Optional[OdooClient] = None
-class DemoSettings:
-    """
-    Simple container for the demo sale order data using fixed demo values.
-    """
-
-    def __init__(self) -> None:
-        self.company = "AMPCO LIGHTING LIMITED"
-        self.customer = "Acuity Brands Lighting Inc"
-        self.salesperson = "Kenny Ng"
-        self.x_studio_customer_po_number = "4227475"
-        self.order_lines = [
-            {
-                "product": "287LC5",
-                "quantity": "204",
-                "x_studio_delivery_date": "2025-12-18",
-            },
-            {
-                "product": "287LC7",
-                "quantity": "300",
-                "x_studio_delivery_date": "2025-12-18",
-            },
-            {
-                "product": "287LCC",
-                "quantity": "504",
-                "x_studio_delivery_date": "2025-11-25",
-            },
-        ]
 
 
 def load_odoo_config() -> OdooConfig:
@@ -125,9 +99,12 @@ def normalize_odoo_datetime(value: str, field_name: str) -> str:
         try:
             dt = datetime.strptime(cleaned, "%m/%d/%Y")
         except ValueError as exc:
-            raise ValueError(
-                f"Unable to parse {field_name} value '{value}' into an ISO datetime string.",
-            ) from exc
+            try:
+                dt = datetime.strptime(cleaned.title(), "%d-%b-%Y")
+            except ValueError as exc_two:
+                raise ValueError(
+                    f"Unable to parse {field_name} value '{value}' into an ISO datetime string.",
+                ) from exc_two
     if dt.tzinfo:
         dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
     # Date/datetime fields should be sent as strings (contentReference[oaicite:1])
@@ -292,19 +269,65 @@ def find_id(
     raise ValueError(f"No '{model}' record matches '{input_value}'.")
 
 
-def create_demo_sale_order(settings: DemoSettings) -> Tuple[int, dict[str, Any]]:
+def parse_po_response_text(po_response: str) -> dict[str, Any]:
+    if not po_response or not po_response.strip():
+        raise ValueError("PO response is empty.")
+    try:
+        tree = ast.parse(po_response, mode="exec")
+    except SyntaxError as exc:
+        raise ValueError(f"PO response has invalid syntax: {exc}") from exc
+
+    parsed: dict[str, Any] = {}
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if not isinstance(target, ast.Attribute):
+            continue
+        if not isinstance(target.value, ast.Name) or target.value.id != "self":
+            continue
+        field_name = target.attr
+        try:
+            parsed[field_name] = ast.literal_eval(node.value)
+        except Exception as exc:
+            raise ValueError(f"Unable to parse value for '{field_name}': {exc}") from exc
+
+    required_fields = [
+        "company",
+        "customer",
+        "salesperson",
+        "x_studio_customer_po_number",
+        "order_lines",
+    ]
+    missing = [field for field in required_fields if field not in parsed]
+    if missing:
+        raise ValueError(f"PO response missing required fields: {', '.join(missing)}")
+    if not isinstance(parsed["order_lines"], list) or not parsed["order_lines"]:
+        raise ValueError("order_lines must be a non-empty list.")
+    return parsed
+
+
+def create_sale_order(po_data: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     client = get_odoo_client()
-    company_id = find_id(client, "res.company", settings.company, fields=["name"])
-    customer_id = find_id(client, "res.partner", settings.customer, fields=["name"])
-    salesperson_id = find_id(client, "res.users", settings.salesperson, fields=["name"])
+    company_id = find_id(client, "res.company", po_data["company"], fields=["name"])
+    customer_id = find_id(client, "res.partner", po_data["customer"], fields=["name"])
+    salesperson_id = find_id(client, "res.users", po_data["salesperson"], fields=["name"])
     order_date_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     order_lines = []
-    for index, line in enumerate(settings.order_lines, start=1):
-        quantity = parse_quantity(line["quantity"])
+    for index, line in enumerate(po_data["order_lines"], start=1):
+        if not isinstance(line, dict):
+            raise ValueError(f"Order line {index} is not a dictionary.")
+        product_value = line.get("product")
+        if not product_value:
+            raise ValueError(f"Order line {index} missing 'product'.")
+        quantity_value = line.get("quantity")
+        if quantity_value is None:
+            raise ValueError(f"Order line {index} missing 'quantity'.")
+        quantity = parse_quantity(str(quantity_value))
         product_id = find_id(
             client,
             "product.product",
-            line["product"],
+            str(product_value),
             fields=["default_code", "name"],
         )
         order_line_values = {
@@ -314,31 +337,24 @@ def create_demo_sale_order(settings: DemoSettings) -> Tuple[int, dict[str, Any]]
         delivery_date = line.get("x_studio_delivery_date")
         if delivery_date:
             order_line_values["x_studio_delivery_date"] = normalize_odoo_datetime(
-                delivery_date,
+                str(delivery_date),
                 f"Delivery Date (line {index})",
             )
         order_lines.append((0, 0, order_line_values))
-
-    if not order_lines:
-        raise ValueError("DemoSettings defines no order lines to import.")
 
     vals = {
         "partner_id": customer_id,
         "company_id": company_id,
         "user_id": salesperson_id,
         "date_order": order_date_iso,
-        "x_studio_customer_po_number": settings.x_studio_customer_po_number,
+        "x_studio_customer_po_number": po_data["x_studio_customer_po_number"],
         # Build one2many commands with (0, 0, values) per XML-RPC protocol (contentReference[oaicite:3])
         "order_line": order_lines,
     }
 
     # Call create() via execute_kw to obtain the new order ID (contentReference[oaicite:6])
     order_id = client.execute_kw("sale.order", "create", [vals])
-    log.info(
-        "Created demo sale.order %s (PO: %s)",
-        order_id,
-        settings.x_studio_customer_po_number,
-    )
+    log.info("Created sale.order %s (PO: %s)", order_id, po_data["x_studio_customer_po_number"])
 
     order_data = client.execute_kw(
         "sale.order",
@@ -349,16 +365,13 @@ def create_demo_sale_order(settings: DemoSettings) -> Tuple[int, dict[str, Any]]
     return order_id, order_data[0] if order_data else {}
 
 
-def main() -> None:
-    try:
-        settings = DemoSettings()
-        order_id, order_data = create_demo_sale_order(settings)
-        print(f"Created sale.order ID: {order_id}")
-        print(f"Order data: {order_data}")
-    except Exception as exc:
-        log.exception("Demo sale order creation failed: %s", exc)
-        raise SystemExit(1) from exc
+def create_sale_order_from_text(po_response: str) -> tuple[int, dict[str, Any]]:
+    po_data = parse_po_response_text(po_response)
+    return create_sale_order(po_data)
 
 
-if __name__ == "__main__":
-    main()
+__all__ = [
+    "create_sale_order",
+    "create_sale_order_from_text",
+    "parse_po_response_text",
+]

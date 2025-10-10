@@ -26,22 +26,23 @@ Output format (exact order and structure, example in "" for illustration only):
     ]
     … continue numbering sequentially for all product present
 
+Field Mapping for Odoo:
+Company: From Company/Supplier/Vendor section or address in Hong Kong (exclude overseas names), or included “Ampco”.
+Customer: From Customer/Sold To/Bill To section or overseas address (exclude “Ampco”).
+Customer PO Number: From PO No./Customer PO Number/Purchase Order No.
+Salesperson: Always "Kenny Ng".
+Product: From Item/Product Code/Part No.; keep only short code, remove “*” or description  (e.g., “*287LC7” → “287LC7”).
+Quantity: From Qty/QTY/Quantity Ordered; numeric only.
+Delivery Date: From Requested/Required/Ship/Delivery Date; standardize to YYYY-MM-DD.
 
-In which only the field self.salesperson = "Kenny Ng" to be hardcoded without reading the pdf parsing information
+Extraction Rules:
+Detect headers using synonyms above.
+Identify company and customer by address: Hong Kong/Ampco → Company; Overseas → Customer.
+Merge tables and pages in reading order; remove formatting marks or symbols.
+Normalize dates and numbers; ensure one continuous, gap-free order list.
+Every order line must include product, quantity, and delivery date; fill using the most relevant parsed value if label variations exist.
+Output one plain text block following the defined field order and syntax, ready for Odoo import without interruption.
+Final output must contain all mandatory fields (company, customer, PO number, and at least one valid order line) or be considered incomplete.
 
-Field mapping rules for Odoo:
-Product: item name, SKU, or product code (accept aliases Item, Product Code, Part No.), long description excluded
-Quantity: numeric only (accept Qty, QTY, Quantity Ordered)
-Delivery Date: requested/required/ship/delivery date (map to commitment date in Odoo), standardize into YYYY-MM-DD format.
-Preserve field order exactly; omit fields not found; do not insert placeholders
-
-Extraction guidance:
-Identify header fields using synonyms: Company/Supplier/Vendor; Customer/Sold To/Bill To; Salesperson/Sales Rep; Order Date/PO Date; Customer PO Number/PO No.
-Standardize Date format into YYYY-MM-DD.
-Remove symbol * in the content of "product", e.g. *287LC7 should be 287LC7
-No missing field are allowed, all information must be avaliable in parsed text blocks
-
-Output rules:
-Plain text only, no markup, no delimiters beyond line breaks
-Fixed field order and naming as defined
-No inferred or guessed data; only parsed text
+Output: 
+Single plain text document, line-break delimited, no markup or metadata, following the defined sequence exactly.

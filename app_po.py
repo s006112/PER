@@ -8,6 +8,8 @@ from pathlib import Path
 import gradio as gr
 from openai import OpenAI
 
+from app_odoo import create_sale_order_from_text
+
 load_dotenv()
 
 # Basic logging setup (tune via LOG_LEVEL env; default INFO)
@@ -82,7 +84,21 @@ def handle_upload(file_path: str) -> Tuple[str, str]:
     except Exception as e:
         return f"Error reading Prompt_po.txt: {e}", ""
     openai_po_response = query_openai_with_prompt(prompt_po_str, pdf_parsing_text)
-    return openai_po_response, pdf_parsing_text
+    sale_order_message = ""
+    if openai_po_response and not openai_po_response.startswith("Error"):
+        try:
+            order_id, _ = create_sale_order_from_text(openai_po_response)
+            sale_order_message = f"Created Odoo sale order ID: {order_id}"
+        except Exception as exc:
+            log.exception("Odoo sale order creation failed: %s", exc)
+            sale_order_message = f"Odoo sale order creation failed: {exc}"
+
+    if sale_order_message:
+        pdf_output = f"{pdf_parsing_text}\n\n{sale_order_message}" if pdf_parsing_text else sale_order_message
+    else:
+        pdf_output = pdf_parsing_text
+
+    return openai_po_response, pdf_output
 
 # ----------------------------
 # UI
