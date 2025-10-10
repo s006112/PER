@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-import os
+import json
 import logging
-from typing import Tuple
-from dotenv import load_dotenv
+import os
 from pathlib import Path
+from typing import Tuple
+
 import gradio as gr
+from dotenv import load_dotenv
 from openai import OpenAI
 
 from app_odoo import create_sale_order_from_text
@@ -58,16 +60,21 @@ def query_openai_with_prompt(prompt_content: str, pdf_parsing_text: str) -> str:
 # Upload handler
 # ----------------------------
 
-def handle_upload(file_path: str) -> Tuple[str, str]:
+def handle_upload(file_path: str, salesperson: str) -> Tuple[str, str]:
     """
     Gradio callback
     - Read PDF path, extract text
     - Query OpenAI for PO extraction details
+    - Inject the manually provided salesperson name into the response
 
     Returns:
       po_response_text (str), pdf_parsing_text (str)
     """
 
+    if not salesperson or not salesperson.strip():
+        return "Error: Sales person is required.", ""
+
+    salesperson_value = salesperson.strip()
     if not file_path or not os.path.isfile(file_path):
         return "Error: No file found.", ""
 
@@ -86,6 +93,13 @@ def handle_upload(file_path: str) -> Tuple[str, str]:
     openai_po_response = query_openai_with_prompt(prompt_po_str, pdf_parsing_text)
     sale_order_message = ""
     if openai_po_response and not openai_po_response.startswith("Error"):
+        lines_without_salesperson = [
+            line for line in openai_po_response.splitlines() if not line.strip().startswith("self.salesperson")
+        ]
+        sanitized_response = "\n".join(line for line in lines_without_salesperson if line.strip())
+        salesperson_literal = json.dumps(salesperson_value)
+        header_line = f"self.salesperson = {salesperson_literal}"
+        openai_po_response = f"{header_line}\n{sanitized_response}" if sanitized_response else header_line
         try:
             order_id, _ = create_sale_order_from_text(openai_po_response)
             sale_order_message = f"Created Odoo sale order ID: {order_id}"
@@ -107,6 +121,7 @@ with gr.Blocks(title="Photometric extraction") as demo:
     # Minimal visible controls: Upload, Submit, PO response
     with gr.Row():
         inp = gr.File(label="Upload PDF File", file_types=[".pdf"], type="filepath")
+        salesperson_input = gr.Textbox(label="Sales person", lines=1, placeholder="Enter sales person name")
     btn = gr.Button("Submit")
 
     po_response_box = gr.Textbox(label="PO response", lines=14, show_copy_button=True)
@@ -121,7 +136,7 @@ with gr.Blocks(title="Photometric extraction") as demo:
     # Wire outputs: PO response (visible) and raw PDF parsing text (hidden but copyable)
     btn.click(
         handle_upload,
-        inputs=inp,
+        inputs=[inp, salesperson_input],
         outputs=[po_response_box, pdf_parsing_box],
     )
 

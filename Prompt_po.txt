@@ -5,7 +5,6 @@ Output: One continuous plain text document, no metadata/JSON/XML/CSV, no page br
 Output format (exact order and structure, example in "" for illustration only):
     self.company = "Ampco Products Limited"
     self.customer = "Focal Point, LLC"
-    self.salesperson = "Kenny Ng"
     self.x_studio_customer_po_number = "PO-001"
     self.order_lines = [
         {
@@ -30,7 +29,6 @@ Field Mapping for Odoo:
 Company: From Company/Supplier/Vendor section or address in Hong Kong (exclude overseas names), or included “Ampco”.
 Customer: From Customer/Sold To/Bill To section or overseas address (exclude “Ampco”).
 Customer PO Number: From PO No./Customer PO Number/Purchase Order No.
-Salesperson: Always "Kenny Ng".
 Product: From Item/Product Code/Part No.; keep only short code, remove “*” or description  (e.g., “*287LC7” → “287LC7”).
 Quantity: From Qty/QTY/Quantity Ordered; numeric only.
 Delivery Date: From Requested/Required/Ship/Delivery Date; standardize to YYYY-MM-DD.

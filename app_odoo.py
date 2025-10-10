@@ -292,10 +292,11 @@ def parse_po_response_text(po_response: str) -> dict[str, Any]:
         except Exception as exc:
             raise ValueError(f"Unable to parse value for '{field_name}': {exc}") from exc
 
+    # keep required field order aligned with the expected PO text sequence
     required_fields = [
+        "salesperson",
         "company",
         "customer",
-        "salesperson",
         "x_studio_customer_po_number",
         "order_lines",
     ]
