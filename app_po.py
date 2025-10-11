@@ -143,12 +143,14 @@ def handle_upload(file_path: str, salesperson: str) -> Tuple[str, str, str]:
 # ----------------------------
 # UI
 # ----------------------------
-with gr.Blocks(title="Photometric extraction") as demo:
+with gr.Blocks(title="SO importer") as demo:
     # Minimal visible controls: Upload, Submit, PO response
     with gr.Row():
         inp = gr.File(label="Upload PDF File", file_types=[".pdf"], type="filepath")
         salesperson_input = gr.Textbox(label="Sales person", lines=1, placeholder="Enter sales person name")
     btn = gr.Button("Submit")
+
+    import_log_box = gr.Textbox(label="Import Log", lines=2, interactive=False)
 
     po_response_box = gr.Textbox(label="PO response", lines=14, show_copy_button=True, visible=_SHOW_PO_TEXTBOXES)
 
@@ -159,8 +161,6 @@ with gr.Blocks(title="Photometric extraction") as demo:
         elem_id="pdf_parsing_box",
         visible=_SHOW_PO_TEXTBOXES,
     )
-
-    import_log_box = gr.Textbox(label="Import Log", lines=2, interactive=False)
 
     # Wire outputs: PO response (visible), raw PDF parsing text (hidden but copyable), and import log
     btn.click(

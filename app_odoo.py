@@ -311,7 +311,7 @@ def parse_po_response_text(po_response: str) -> dict[str, Any]:
 
 def create_sale_order(po_data: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     client = get_odoo_client()
-    company_id = find_id(client, "res.company", po_data["company"], fields=["name"])
+    default_company_name = os.getenv("ODOO_DEFAULT_COMPANY_NAME")
     customer_id = find_id(client, "res.partner", po_data["customer"], fields=["name"])
     salesperson_id = find_id(client, "res.users", po_data["salesperson"], fields=["name"])
     order_date_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
@@ -344,27 +344,69 @@ def create_sale_order(po_data: dict[str, Any]) -> tuple[int, dict[str, Any]]:
             )
         order_lines.append((0, 0, order_line_values))
 
-    vals = {
-        "partner_id": customer_id,
-        "company_id": company_id,
-        "user_id": salesperson_id,
-        "date_order": order_date_iso,
-        "x_studio_customer_po_number": po_data["x_studio_customer_po_number"],
-        # Build one2many commands with (0, 0, values) per XML-RPC protocol (contentReference[oaicite:3])
-        "order_line": order_lines,
-    }
+    attempted_fallback = False
+    current_company_name = str(po_data["company"])
 
-    # Call create() via execute_kw to obtain the new order ID (contentReference[oaicite:6])
-    order_id = client.execute_kw("sale.order", "create", [vals])
-    log.info("Created sale.order %s (PO: %s)", order_id, po_data["x_studio_customer_po_number"])
+    while True:
+        try:
+            company_id = find_id(client, "res.company", current_company_name, fields=["name"])
+        except ValueError as exc:
+            if (
+                default_company_name
+                and not attempted_fallback
+                and default_company_name.strip()
+                and default_company_name.strip() != str(current_company_name).strip()
+            ):
+                log.warning(
+                    "Retrying company lookup with fallback company '%s' after error: %s",
+                    default_company_name,
+                    exc,
+                )
+                current_company_name = default_company_name.strip()
+                attempted_fallback = True
+                continue
+            raise
+        vals = {
+            "partner_id": customer_id,
+            "company_id": company_id,
+            "user_id": salesperson_id,
+            "date_order": order_date_iso,
+            "x_studio_customer_po_number": po_data["x_studio_customer_po_number"],
+            # Build one2many commands with (0, 0, values) per XML-RPC protocol (contentReference[oaicite:3])
+            "order_line": order_lines,
+        }
 
-    order_data = client.execute_kw(
-        "sale.order",
-        "read",
-        [[order_id], ["name", "order_line"]],
-    )
-    log.info("Order %s readback: %s", order_id, order_data)
-    return order_id, order_data[0] if order_data else {}
+        try:
+            # Call create() via execute_kw to obtain the new order ID (contentReference[oaicite:6])
+            order_id = client.execute_kw("sale.order", "create", [vals])
+        except xmlrpc_client.Fault as exc:
+            fault_message = exc.faultString or ""
+            if (
+                "Access to unauthorized or invalid companies." in fault_message
+                and default_company_name
+                and not attempted_fallback
+                and default_company_name.strip()
+                and default_company_name.strip() != current_company_name.strip()
+            ):
+                log.warning(
+                    "Retrying sale.order creation with fallback company '%s' due to fault: %s",
+                    default_company_name,
+                    fault_message,
+                )
+                current_company_name = default_company_name.strip()
+                attempted_fallback = True
+                continue
+            raise RuntimeError(f"Odoo error while creating sale order: {fault_message}") from exc
+
+        log.info("Created sale.order %s (PO: %s)", order_id, po_data["x_studio_customer_po_number"])
+
+        order_data = client.execute_kw(
+            "sale.order",
+            "read",
+            [[order_id], ["name", "order_line"]],
+        )
+        log.info("Order %s readback: %s", order_id, order_data)
+        return order_id, order_data[0] if order_data else {}
 
 
 def create_sale_order_from_text(po_response: str) -> tuple[int, dict[str, Any]]:
@@ -378,29 +420,15 @@ def attach_pdf_to_sale_order(
     note_body: str = "Attached customer PO",
 ) -> int:
     client = get_odoo_client()
-    if not sale_order_identifier or not sale_order_identifier.strip():
-        raise ValueError("Sale order identifier must be provided.")
     order_id = find_id(client, "sale.order", sale_order_identifier, fields=["name"])
 
-    if not pdf_path:
-        raise ValueError("PDF path is empty.")
-    if not os.path.isfile(pdf_path):
-        raise FileNotFoundError(f"PDF file not found: {pdf_path}")
-    if not pdf_path.lower().endswith(".pdf"):
-        raise ValueError(f"Attachment must be a PDF file: {pdf_path}")
-
-    try:
-        with open(pdf_path, "rb") as pdf_file:
-            pdf_bytes = pdf_file.read()
-    except FileNotFoundError:
-        raise FileNotFoundError(f"PDF file not found: {pdf_path}")
-
-    if not pdf_bytes:
-        raise ValueError(f"PDF file '{pdf_path}' is empty.")
+    pdf_path_clean = str(pdf_path).strip()
+    with open(pdf_path_clean, "rb") as pdf_file:
+        pdf_bytes = pdf_file.read()
 
     encoded_pdf = base64.b64encode(pdf_bytes).decode("ascii")
     attachment_vals = {
-        "name": os.path.basename(pdf_path),
+        "name": os.path.basename(pdf_path_clean),
         "type": "binary",
         "datas": encoded_pdf,
         "res_model": "sale.order",
@@ -410,12 +438,7 @@ def attach_pdf_to_sale_order(
 
     try:
         attachment_result = client.execute_kw("ir.attachment", "create", [attachment_vals])
-        if isinstance(attachment_result, list):
-            if not attachment_result:
-                raise RuntimeError("Odoo returned an empty attachment id list.")
-            attachment_id = int(attachment_result[0])
-        else:
-            attachment_id = int(attachment_result)
+        attachment_id = int(attachment_result)
         client.execute_kw(
             "sale.order",
             "message_post",
@@ -428,7 +451,7 @@ def attach_pdf_to_sale_order(
 
     log.info(
         "Attached PDF '%s' to sale.order %s (order_id=%s, attachment_id=%s)",
-        os.path.basename(pdf_path),
+        os.path.basename(pdf_path_clean),
         sale_order_identifier,
         order_id,
         attachment_id,
