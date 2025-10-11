@@ -11,32 +11,25 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 from app_odoo import attach_pdf_to_sale_order, create_sale_order_from_text
+from chunk_pdf import _extract_text_with_pymupdf
 
 load_dotenv()
+
+def _env_flag(name: str, default: bool) -> bool:
+    """Interpret environment variable `name` as boolean: only 'true' (case-insensitive) is treated as True."""
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() == "true"
+
 
 # Basic logging setup (tune via LOG_LEVEL env; default INFO)
 _LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=getattr(logging, _LOG_LEVEL, logging.INFO), format="%(levelname)s: %(message)s")
 log = logging.getLogger("app")
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-_SHOW_PO_TEXTBOXES = os.getenv("PO_SHOW_TEXTBOXES", "true").strip().lower() not in {"0", "false", "no", "off"}
-
-# ----------------------------
-# PDF parsing
-# ----------------------------
-def extract_pdf_text_from_bytes(data: bytes) -> Tuple[str, str]:
-    """
-    Parse PDF bytes into plain text using PyMuPDF when available.
-    Returns: (engine_name, pdf_parsing_text)
-    """
-    try:
-        import fitz  # PyMuPDF
-        doc = fitz.open(stream=data, filetype="pdf")
-        pdf_parsing_text = "\n".join([page.get_text("text") for page in doc])
-        return "PyMuPDF", pdf_parsing_text
-    except Exception as e:
-        # Keep behavior minimal: signal parsing failure by empty text
-        return f"Error: {e}", ""
+_SHOW_PO_TEXTBOXES = _env_flag("PO_SHOW_TEXTBOXES", False)
+_ODOO_IMPORT_ENABLED = _env_flag("ODOO_IMPORT", False)
 
 # ----------------------------
 # OpenAI helper
@@ -82,9 +75,10 @@ def handle_upload(file_path: str, salesperson: str) -> Tuple[str, str, str]:
     with open(file_path, "rb") as f:
         data = f.read()
 
-    _engine, pdf_parsing_text = extract_pdf_text_from_bytes(data)
-    if not pdf_parsing_text:
+    pdf_pages = _extract_text_with_pymupdf(data)
+    if not pdf_pages:
         return "Error: PDF parsing failed.", "", ""
+    pdf_parsing_text = "\n\n".join(pdf_pages.values())
 
     base_dir = Path(__file__).parent
     try:
@@ -101,36 +95,39 @@ def handle_upload(file_path: str, salesperson: str) -> Tuple[str, str, str]:
         salesperson_literal = json.dumps(salesperson_value)
         header_line = f"self.salesperson = {salesperson_literal}"
         openai_po_response = f"{header_line}\n{sanitized_response}" if sanitized_response else header_line
-        try:
-            order_id, order_data = create_sale_order_from_text(openai_po_response)
-            creation_message = f"Created Odoo sale order ID: {order_id}"
-            import_messages.append(creation_message)
+        if _ODOO_IMPORT_ENABLED:
+            try:
+                order_id, order_data = create_sale_order_from_text(openai_po_response)
+                creation_message = f"Created Odoo sale order ID: {order_id}"
+                import_messages.append(creation_message)
 
-            order_name = ""
-            if isinstance(order_data, dict):
-                order_name = str(order_data.get("name") or "").strip()
-            if not order_name:
-                log.error("Missing sale order name for order %s; skipping attachment.", order_id)
-                import_messages.append("Attachment skipped: missing sale order name from Odoo response.")
-            else:
-                try:
-                    attachment_id = attach_pdf_to_sale_order(
-                        sale_order_identifier=order_name,
-                        pdf_path=file_path,
-                        note_body="Attached customer PO",
-                    )
-                    import_messages.append(f"Attached PDF as ir.attachment {attachment_id}")
-                except Exception as attach_exc:
-                    log.exception(
-                        "Failed to attach PDF '%s' to sale order %s: %s",
-                        file_path,
-                        order_name,
-                        attach_exc,
-                    )
-                    import_messages.append(f"Attachment failed: {attach_exc}")
-        except Exception as exc:
-            log.exception("Odoo sale order creation failed: %s", exc)
-            import_messages.append(f"Odoo sale order creation failed: {exc}")
+                order_name = ""
+                if isinstance(order_data, dict):
+                    order_name = str(order_data.get("name") or "").strip()
+                if not order_name:
+                    log.error("Missing sale order name for order %s; skipping attachment.", order_id)
+                    import_messages.append("Attachment skipped: missing sale order name from Odoo response.")
+                else:
+                    try:
+                        attachment_id = attach_pdf_to_sale_order(
+                            sale_order_identifier=order_name,
+                            pdf_path=file_path,
+                            note_body="Attached customer PO",
+                        )
+                        import_messages.append(f"Attached PDF as ir.attachment {attachment_id}")
+                    except Exception as attach_exc:
+                        log.exception(
+                            "Failed to attach PDF '%s' to sale order %s: %s",
+                            file_path,
+                            order_name,
+                            attach_exc,
+                        )
+                        import_messages.append(f"Attachment failed: {attach_exc}")
+            except Exception as exc:
+                log.exception("Odoo sale order creation failed: %s", exc)
+                import_messages.append(f"Odoo sale order creation failed: {exc}")
+        else:
+            import_messages.append("Odoo import skipped: ODOO_IMPORT flag is not set to true.")
 
     import_log_message = "\n".join(import_messages)
     if import_log_message:
