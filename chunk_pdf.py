@@ -5,9 +5,12 @@ from __future__ import annotations
 import inspect
 import json
 import logging
-from typing import List, Tuple
+import tempfile
+from pathlib import Path
+from typing import Callable, List, Tuple
 
 import fitz  # PyMuPDF：用於處理 PDF 文件的主要函式庫
+import ocrmypdf  # OCR fallback for image-based PDFs
 from chunk_san import sanitize_text  # 自訂的文字清洗函數，用來淨化提取出的 PDF 文字
 
 logger = logging.getLogger(__name__)  # 初始化日誌記錄器
@@ -30,19 +33,50 @@ def _infer_filename_from_stack() -> str | None:
 # -------------------------------------------------------------------------------------
 def _extract_text_with_pymupdf(data: bytes) -> dict[int, str]:
     """使用 PyMuPDF 將 PDF 二進位資料轉換為 {頁碼: 淨化後文字} 的字典。"""
-    try:
-        with fitz.open(stream=data, filetype="pdf") as doc:
+
+    def _run_extraction(pdf_bytes: bytes) -> dict[int, str]:
+        with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
             return {
-                i: sanitize_text(t)  # 對每頁提取出的文字做淨化處理
+                i: sanitize_text(t)
                 for i, t in (
-                    (n, p.get_text("text", sort=True).strip())  # 以「自然閱讀順序」擷取純文字
-                    for n, p in enumerate(doc, 1)  # 頁碼從 1 開始
+                    (n, p.get_text("text", sort=True).strip())
+                    for n, p in enumerate(doc, 1)
                 )
-                if t  # 若該頁為空則略過
+                if t
             }
+
+    try:
+        pages = _run_extraction(data)
+        if pages:
+            return pages
+        # PyMuPDF returned no text; fall back to OCR once.
+        logger.info("PyMuPDF extracted no text, attempting OCR fallback.")
     except Exception as exc:
         logger.error("Extraction failed: %s", exc)
-        return {}
+    return _extract_text_with_ocr_fallback(data, _run_extraction)
+
+
+def _extract_text_with_ocr_fallback(
+    data: bytes,
+    extractor: Callable[[bytes], dict[int, str]],
+) -> dict[int, str]:
+    """使用 OCR 產生可搜尋 PDF 後重新提取文字。"""
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            src_path = Path(tmpdir, "source.pdf")
+            ocr_path = Path(tmpdir, "ocr.pdf")
+            src_path.write_bytes(data)
+            # Run OCR to produce a searchable PDF; skip existing text to avoid duplicates.
+            ocrmypdf.ocr(str(src_path), str(ocr_path), skip_text=True)
+            ocr_bytes = ocr_path.read_bytes()
+        pages = extractor(ocr_bytes)
+        if pages:
+            logger.info("OCR fallback succeeded.")
+            return pages
+        logger.warning("OCR fallback produced no text.")
+    except Exception as exc:
+        logger.error("OCR fallback failed: %s", exc)
+    return {}
 
 # -------------------------------------------------------------------------------------
 # 封裝提取流程：對外公開的頁面文字提取接口
