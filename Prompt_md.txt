@@ -13,6 +13,7 @@ If text is unrecognizable or contains special symbols, keep it exactly as is
 Calculate CRI (Color Rendering Index): compute the arithmetic mean of R1–R14 for each sample, rounded to one decimal place; insert the result into the placeholder “$$$” in the template
 If multiple datasets are found, merge them into a single table, ordered by dataset sequence
 Output only to the following separate three tables in the exact given format, preserving column names, order, and structure;
+The Power (W) in the first table be explicitly an electrical power, instead of photo nor radiant power.
 Fill extracted values of only numerical data into the cells, without unit
 Leave the cells blanks as empty content
 Do not output anything other than the three tables (no explanations, headings, notes, or code blocks)
