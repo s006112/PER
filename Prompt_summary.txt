@@ -1,11 +1,14 @@
 Analyze the product category table and remarks dataset to produce the following outputs:
-• Begin with a concise, professional English paragraph summarizing in detail the photometric numerical performance
+• Begin with, concise, professional English bullet-point-form-summarizing in detail the photometric numerical performance
 • Follow with a structured list with subtopic ### that includes:
-　- All outstanding performance metrics that clearly demonstrate strong results
-　- Any abnormal values, outliers, or inconsistencies, such as sudden drops, unusually high/low readings, or irregular distribution patterns
-　- Deviations from expected standards, benchmarks, or design specifications
-　- all list initiated by checkboxes, instead of bullet points
+　- "Outstanding performance metrics": clearly demonstrate strong results
+　- "Abnormal values, outliers, or inconsistencies": such as sudden drops, unusually high/low readings, or irregular distribution patterns
+　- "Deviations": Any metrics deviation from expected standards, benchmarks, or design specifications
+• all list points should be replaced by checkboxes symbol - [ ]
 • Ensure the tone is professional, technical, precise, and focused on clarity
 • Structure the point list so that critical anomalies are highlighted distinctly from normal performance data
 • Do not use three-dash markdown horizontal rules
 • Provide only the requested summary and list without additional remarks or reasoning
+
+
+Reference format below:
