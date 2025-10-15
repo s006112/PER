@@ -66,8 +66,8 @@ def _extract_text_with_ocr_fallback(
             src_path = Path(tmpdir, "source.pdf")
             ocr_path = Path(tmpdir, "ocr.pdf")
             src_path.write_bytes(data)
-            # Run OCR to produce a searchable PDF; skip existing text to avoid duplicates.
-            ocrmypdf.ocr(str(src_path), str(ocr_path), skip_text=True)
+            # Run OCR to produce a searchable PDF; skip existing text and avoid Ghostscript regression.
+            ocrmypdf.ocr(str(src_path), str(ocr_path), skip_text=True, output_type="pdf")
             ocr_bytes = ocr_path.read_bytes()
         pages = extractor(ocr_bytes)
         if pages:
