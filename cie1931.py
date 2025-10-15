@@ -66,6 +66,69 @@ def get_drawing_javascript() -> str:
     return ga && ga.shadowRoot ? ga.shadowRoot : document;
   }}
 
+  function ensureClipboardFallback(){{
+    if (window.isSecureContext) return;
+    const root = gradioRoot();
+    if (!root) return;
+
+    const fallbackCopy = (text) => {{
+      const host = document.body || root;
+      const tmp = document.createElement("textarea");
+      tmp.value = text == null ? "" : String(text);
+      tmp.setAttribute("readonly", "");
+      tmp.style.position = "fixed";
+      tmp.style.opacity = "0";
+      tmp.style.top = "-1000px";
+      host.appendChild(tmp);
+      try {{
+        tmp.focus({{ preventScroll: true }});
+      }} catch (_err) {{}}
+      tmp.select();
+      try {{
+        document.execCommand("copy");
+      }} catch (err) {{
+        console.error("Clipboard fallback failed", err);
+      }}
+      host.removeChild(tmp);
+    }};
+
+    const bind = () => {{
+      const buttons = root.querySelectorAll('button[aria-label*="Copy"],button[data-testid*="copy"]');
+      buttons.forEach((btn) => {{
+        if (btn.dataset.clipboardFallbackBound) return;
+        btn.dataset.clipboardFallbackBound = "1";
+        btn.addEventListener(
+          "click",
+          (ev) => {{
+            if (window.isSecureContext) return;
+            const host = btn.closest('[data-testid="textbox"]') || btn.closest('[data-testid]');
+            let value = "";
+            if (host) {{
+              const input = host.querySelector("textarea, input");
+              if (input) {{
+                value = input.value || "";
+              }} else {{
+                const rich = host.querySelector('[contenteditable="true"], pre, code');
+                if (rich) {{
+                  value = rich.innerText || rich.textContent || "";
+                }}
+              }}
+            }}
+            fallbackCopy(value);
+            ev.preventDefault();
+            ev.stopImmediatePropagation();
+          }},
+          true
+        );
+      }});
+    }};
+
+    const observer = new MutationObserver(bind);
+    observer.observe(root, {{ childList: true, subtree: true }});
+    bind();
+  }}
+  ensureClipboardFallback();
+
   function extractPoints(root){{
     const host = root.getElementById("cct_xy_df");
     if(!host) return [];
