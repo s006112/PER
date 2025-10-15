@@ -28,7 +28,7 @@ _LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=getattr(logging, _LOG_LEVEL, logging.INFO), format="%(levelname)s: %(message)s")
 log = logging.getLogger("app")
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-_SHOW_PO_TEXTBOXES = _env_flag("PO_SHOW_TEXTBOXES", False)
+_SHOW_PO_TEXTBOXES = _env_flag("DEBUG_TEXTBOXES", False)
 _ODOO_IMPORT_ENABLED = _env_flag("ODOO_IMPORT", False)
 
 # ----------------------------

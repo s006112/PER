@@ -14,6 +14,7 @@ import gradio as gr
 from openai import OpenAI
 from cie1931 import get_canvas_html, get_drawing_javascript
 from nextcloud_upload import share, ushare
+from chunk_pdf import get_pdf_full_text
 
 load_dotenv()
 
@@ -27,23 +28,7 @@ PNG_REMOTE_DIR = "/Documents/PER/CIE Chart"
 PNG_PLACEHOLDER_PREFIX = "cie-share://"
 
 LATEST_SUMMARY: str = ""
-
-# ----------------------------
-# PDF parsing
-# ----------------------------
-def extract_pdf_text_from_bytes(data: bytes) -> Tuple[str, str]:
-    """
-    Parse PDF bytes into plain text using PyMuPDF when available.
-    Returns: (engine_name, text)
-    """
-    try:
-        import fitz  # PyMuPDF
-        doc = fitz.open(stream=data, filetype="pdf")
-        text = "\n".join([page.get_text("text") for page in doc])
-        return "PyMuPDF", text
-    except Exception as e:
-        # Keep behavior minimal: signal parsing failure by empty text
-        return f"Error: {e}", ""
+DEBUG_TEXTBOXES = os.getenv("DEBUG_TEXTBOXES", "false").strip().lower() == "true"
 
 # ----------------------------
 # OpenAI helper
@@ -85,7 +70,12 @@ def handle_upload(file_path: str) -> Tuple[str, List[List[float | str]], str, st
     with open(file_path, "rb") as f:
         data = f.read()
 
-    _engine, text = extract_pdf_text_from_bytes(data)
+    try:
+        text = get_pdf_full_text(data, filename=Path(file_path).name)
+    except Exception as exc:
+        log.error("PDF parsing failed: %s", exc)
+        return "Error: PDF parsing failed.", [], ""
+
     if not text:
         return "Error: PDF parsing failed.", [], ""
 
@@ -303,10 +293,9 @@ with gr.Blocks(title="Photometric extraction") as demo:
     # CIE chart
     gr.HTML(get_canvas_html(), elem_id="cie_box")
 
-    # Hidden (but present in DOM): original text, parsed CIE x,y table, and planned PNG filename
-    # Keep DOM so the JS can read values for plotting.
+    # Expose raw PDF text and parsed x,y table; hide them via CSS unless debugging is enabled.
     original_text_box = gr.Textbox(
-        label="Sphere PDF extraction",
+        label="Raw PDF text",
         lines=10,
         show_copy_button=True,
         elem_id="original_text_box",
@@ -333,18 +322,23 @@ with gr.Blocks(title="Photometric extraction") as demo:
         elem_id="cie_png_name",
     )
 
+    hidden_rules = [
+        "#cie_png_upload { display: none !important; }",
+        "#cie_png_name { display: none !important; }",
+    ]
+    if not DEBUG_TEXTBOXES:
+        hidden_rules.extend(
+            [
+                "#cct_xy_df { display: none !important; }",
+                "#original_text_box { display: none !important; }",
+            ]
+        )
+
     gr.HTML(
-        """
-        <style>
-          #cct_xy_df { display: none !important; }
-          #original_text_box { display: none !important; }
-          #cie_png_upload { display: none !important; }
-          #cie_png_name { display: none !important; }
-        </style>
-        """
+        "<style>\n  " + "\n  ".join(hidden_rules) + "\n</style>"
     )
 
-    # Wire outputs: summary (visible), dataframe + original text (hidden), and PNG filename (hidden)
+    # Wire outputs: summary, parsed table, raw text, and planned PNG filename
     btn.click(
         handle_upload,
         inputs=inp,
