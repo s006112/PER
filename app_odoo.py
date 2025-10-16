@@ -312,7 +312,9 @@ def parse_po_response_text(po_response: str) -> dict[str, Any]:
 def create_sale_order(po_data: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     client = get_odoo_client()
     default_company_name = os.getenv("ODOO_DEFAULT_COMPANY_NAME")
-    customer_id = find_id(client, "res.partner", po_data["customer"], fields=["name"])
+    customer_value = str(po_data["customer"])
+    customer_has_acuity = "acuity" in customer_value.lower()
+    customer_id = find_id(client, "res.partner", customer_value, fields=["name"])
     salesperson_id = find_id(client, "res.users", po_data["salesperson"], fields=["name"])
     order_date_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     order_lines = []
@@ -337,7 +339,7 @@ def create_sale_order(po_data: dict[str, Any]) -> tuple[int, dict[str, Any]]:
             "product_uom_qty": quantity,
         }
         delivery_date = line.get("x_studio_delivery_date")
-        if delivery_date:
+        if delivery_date and not customer_has_acuity:
             order_line_values["x_studio_delivery_date"] = normalize_odoo_datetime(
                 str(delivery_date),
                 f"Delivery Date (line {index})",
