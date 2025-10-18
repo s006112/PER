@@ -120,11 +120,11 @@ def parse_quantity(raw_value: str) -> float:
     return float(match.group())
 
 
-_NORMALIZE_PATTERN = re.compile(r"[^0-9a-z]+")
+_NORMALIZE_PATTERN = re.compile(r"[\W_]+", re.UNICODE)
 
 
 def _normalize_value(raw_value: str) -> str:
-    return _NORMALIZE_PATTERN.sub("", raw_value.lower())
+    return _NORMALIZE_PATTERN.sub("", raw_value.casefold())
 
 
 def _select_candidate(candidates: list[tuple[int, str, str]]) -> int:
@@ -169,15 +169,15 @@ def _fetch_candidates_for_field(
         if add_records(exact_records):
             return candidates
 
-        for prefix_length in range(len(stripped_input), 0, -1):
-            prefix = stripped_input[:prefix_length]
-            prefix_records = client.execute_kw(
+        for substring_length in range(len(stripped_input), 0, -1):
+            substring = stripped_input[:substring_length]
+            substring_records = client.execute_kw(
                 model,
                 "search_read",
-                [[[field, "ilike", f"{prefix}%"]]],
+                [[[field, "ilike", f"%{substring}%"]]],
                 {"fields": [field], "limit": limit},
             )
-            if add_records(prefix_records):
+            if add_records(substring_records):
                 return candidates
         if candidates:
             return candidates
@@ -225,6 +225,7 @@ def find_id(
     winner is chosen deterministically using shortest normalized length, lexicographical order,
     then lowest record ID.
     """
+    # Require at least one lookup field and a non-empty value that survives normalization.
     if not fields:
         raise ValueError("At least one field must be provided to locate record IDs.")
     if not input_value:
@@ -234,6 +235,7 @@ def find_id(
         raise ValueError(f"Input '{input_value}' is invalid after normalization.")
 
     for field in fields:
+        # Gather candidate records for this field using layered search heuristics.
         candidates = _fetch_candidates_for_field(
             client,
             model,
@@ -245,28 +247,38 @@ def find_id(
         if not candidates:
             continue
 
+        # Return immediately when a normalized exact match surfaces.
         for candidate in candidates:
             if candidate[1] == normalized_input:
                 return candidate[0]
 
+        base_candidates = candidates
         current_set = candidates
         last_non_empty: Optional[list[tuple[int, str, str]]] = None
-        for index in range(1, len(normalized_input) + 1):
-            prefix = normalized_input[:index]
-            filtered = [candidate for candidate in current_set if candidate[1].startswith(prefix)]
+        for window_end in range(len(normalized_input), 0, -1):
+            window = normalized_input[:window_end]
+            direct_match = [candidate for candidate in current_set if candidate[1] == window]
+            if direct_match:
+                return _select_candidate(direct_match)
+            filtered = [candidate for candidate in current_set if window in candidate[1]]
             if filtered:
-                last_non_empty = filtered
-                current_set = filtered
+                prefix_filtered = [candidate for candidate in filtered if candidate[1].startswith(window)]
+                active_set = prefix_filtered or filtered
+                # Keep shrinking the candidate pool as windows get shorter while allowing substring matches.
+                last_non_empty = active_set
+                current_set = active_set
             else:
                 if last_non_empty:
+                    # When the window no longer matches anything, fall back to the last viable subset.
                     return _select_candidate(last_non_empty)
-                break
+                current_set = base_candidates
+                continue
         else:
-            if current_set:
-                return _select_candidate(current_set)
             if last_non_empty:
+                # Exhausted every window; pick the best fit from the last matching set.
                 return _select_candidate(last_non_empty)
 
+    # No candidates ever matched across all fields.
     raise ValueError(f"No '{model}' record matches '{input_value}'.")
 
 
