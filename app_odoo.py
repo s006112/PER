@@ -233,6 +233,8 @@ def find_id(
     normalized_input = _normalize_value(input_value)
     if not normalized_input:
         raise ValueError(f"Input '{input_value}' is invalid after normalization.")
+    best_match_length = 0
+    best_match_candidates: dict[int, tuple[int, str, str]] = {}
 
     for field in fields:
         # Gather candidate records for this field using layered search heuristics.
@@ -254,29 +256,38 @@ def find_id(
 
         base_candidates = candidates
         current_set = candidates
-        last_non_empty: Optional[list[tuple[int, str, str]]] = None
+        field_best_length = 0
+        field_best_map: dict[int, tuple[int, str, str]] = {}
         for window_end in range(len(normalized_input), 0, -1):
             window = normalized_input[:window_end]
-            direct_match = [candidate for candidate in current_set if candidate[1] == window]
-            if direct_match:
-                return _select_candidate(direct_match)
             filtered = [candidate for candidate in current_set if window in candidate[1]]
             if filtered:
                 prefix_filtered = [candidate for candidate in filtered if candidate[1].startswith(window)]
                 active_set = prefix_filtered or filtered
-                # Keep shrinking the candidate pool as windows get shorter while allowing substring matches.
-                last_non_empty = active_set
+                # Keep shrinking the candidate pool as windows get shorter while recording strongest coverage.
                 current_set = active_set
+                if window_end > field_best_length:
+                    field_best_length = window_end
+                    field_best_map = {candidate[0]: candidate for candidate in active_set}
+                elif window_end == field_best_length and field_best_length:
+                    for candidate in active_set:
+                        field_best_map.setdefault(candidate[0], candidate)
             else:
-                if last_non_empty:
-                    # When the window no longer matches anything, fall back to the last viable subset.
-                    return _select_candidate(last_non_empty)
                 current_set = base_candidates
                 continue
-        else:
-            if last_non_empty:
-                # Exhausted every window; pick the best fit from the last matching set.
-                return _select_candidate(last_non_empty)
+
+        if field_best_map:
+            if field_best_length == len(normalized_input):
+                return _select_candidate(list(field_best_map.values()))
+            if field_best_length > best_match_length:
+                best_match_length = field_best_length
+                best_match_candidates = field_best_map.copy()
+            elif field_best_length == best_match_length:
+                for candidate in field_best_map.values():
+                    best_match_candidates.setdefault(candidate[0], candidate)
+
+    if best_match_candidates:
+        return _select_candidate(list(best_match_candidates.values()))
 
     # No candidates ever matched across all fields.
     raise ValueError(f"No '{model}' record matches '{input_value}'.")
