@@ -1,0 +1,5 @@
+{
+  "name": "PER-dev",
+  "image": "ubuntu:22.04-custom",
+  "runArgs": ["--name=per-dev"]
+}
