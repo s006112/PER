@@ -15,6 +15,7 @@ from openai import OpenAI
 from cie1931 import get_canvas_html, get_drawing_javascript
 from nextcloud_upload import share, ushare
 from chunk_pdf import get_pdf_full_text
+from clipboard_polyfill import CLIPBOARD_POLYFILL
 
 load_dotenv()
 
@@ -282,7 +283,7 @@ def upload_cie_png(payload: str) -> str:
 # ----------------------------
 # UI
 # ----------------------------
-with gr.Blocks(title="Photometric extraction") as demo:
+with gr.Blocks(title="Photometric extraction", head=CLIPBOARD_POLYFILL) as demo:
     # Minimal visible controls: Upload, Submit, Summary, CIE canvas
     with gr.Row():
         inp = gr.File(label="Upload PDF File", file_types=[".pdf"], type="filepath")

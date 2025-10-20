@@ -13,6 +13,8 @@ from openai import OpenAI
 from app_odoo import attach_pdf_to_sale_order, create_sale_order_from_text
 from chunk_pdf import _extract_text_with_pymupdf
 
+from clipboard_polyfill import CLIPBOARD_POLYFILL
+
 load_dotenv()
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -140,7 +142,7 @@ def handle_upload(file_path: str, salesperson: str) -> Tuple[str, str, str]:
 # ----------------------------
 # UI
 # ----------------------------
-with gr.Blocks(title="SO importer") as demo:
+with gr.Blocks(title="SO importer", head=CLIPBOARD_POLYFILL) as demo:
     # Minimal visible controls: Upload, Submit, PO response
     with gr.Row():
         inp = gr.File(label="Upload PDF File", file_types=[".pdf"], type="filepath")

@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 import gradio as gr
 from openai import OpenAI
+from clipboard_polyfill import CLIPBOARD_POLYFILL
 
 load_dotenv()
 
@@ -83,7 +84,7 @@ def _append_to_weekly_log(base_dir: Path, source_text: str, summary_text: str) -
 # ----------------------------
 # UI
 # ----------------------------
-with gr.Blocks(title="Weekly Summary") as demo:
+with gr.Blocks(title="Weekly Summary", head=CLIPBOARD_POLYFILL) as demo:
     # Minimal visible controls: Text input, Submit, Weekly summary
     with gr.Row():
         inp = gr.Textbox(
