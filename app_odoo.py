@@ -357,7 +357,6 @@ def parse_po_response_text(po_response: str) -> dict[str, Any]:
 
 def create_sale_order(po_data: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     client = get_odoo_client()
-    # default_company_name = os.getenv("ODOO_DEFAULT_COMPANY_NAME")
     customer_value = str(po_data["customer"])
     customer_has_acuity = "acuity" in customer_value.lower()
     customer_id = find_id(client, "res.partner", customer_value, fields=["name"])
@@ -392,69 +391,35 @@ def create_sale_order(po_data: dict[str, Any]) -> tuple[int, dict[str, Any]]:
             )
         order_lines.append((0, 0, order_line_values))
 
-    attempted_fallback = False
     current_company_name = str(po_data["company"])
 
-    while True:
-        try:
-            company_id = find_id(client, "res.company", current_company_name, fields=["name"])
-        except ValueError as exc:
-            if (
-                default_company_name
-                and not attempted_fallback
-                and default_company_name.strip()
-                and default_company_name.strip() != str(current_company_name).strip()
-            ):
-                log.warning(
-                    "Retrying company lookup with fallback company '%s' after error: %s",
-                    default_company_name,
-                    exc,
-                )
-                current_company_name = default_company_name.strip()
-                attempted_fallback = True
-                continue
-            raise
-        vals = {
-            "partner_id": customer_id,
-            "company_id": company_id,
-            "user_id": salesperson_id,
-            "date_order": order_date_iso,
-            "x_studio_customer_po_number": po_data["x_studio_customer_po_number"],
-            # Build one2many commands with (0, 0, values) per XML-RPC protocol (contentReference[oaicite:3])
-            "order_line": order_lines,
-        }
+    company_id = find_id(client, "res.company", current_company_name, fields=["name"])
+    vals = {
+        "partner_id": customer_id,
+        "company_id": company_id,
+        "user_id": salesperson_id,
+        "date_order": order_date_iso,
+        "x_studio_customer_po_number": po_data["x_studio_customer_po_number"],
+        # Build one2many commands with (0, 0, values) per XML-RPC protocol (contentReference[oaicite:3])
+        "order_line": order_lines,
+    }
 
-        try:
-            # Call create() via execute_kw to obtain the new order ID (contentReference[oaicite:6])
-            order_id = client.execute_kw("sale.order", "create", [vals])
-        except xmlrpc_client.Fault as exc:
-            fault_message = exc.faultString or ""
-            if (
-                "Access to unauthorized or invalid companies." in fault_message
-                and default_company_name
-                and not attempted_fallback
-                and default_company_name.strip()
-                and default_company_name.strip() != current_company_name.strip()
-            ):
-                log.warning(
-                    "Retrying sale.order creation with fallback company '%s' due to fault: %s",
-                    default_company_name,
-                    fault_message,
-                )
-                current_company_name = default_company_name.strip()
-                attempted_fallback = True
-                continue
-            raise RuntimeError(f"Odoo error while creating sale order: {fault_message}") from exc
+    try:
+        # Call create() via execute_kw to obtain the new order ID (contentReference[oaicite:6])
+        order_id = client.execute_kw("sale.order", "create", [vals])
+    except xmlrpc_client.Fault as exc:
+        fault_message = exc.faultString or ""
+        raise RuntimeError(f"Odoo error while creating sale order: {fault_message}") from exc
 
-        log.info("Created sale.order %s (PO: %s)", order_id, po_data["x_studio_customer_po_number"])
+    log.info("Created sale.order %s (PO: %s)", order_id, po_data["x_studio_customer_po_number"])
 
-        order_data = client.execute_kw(
-            "sale.order",
-            "read",
-            [[order_id], ["name", "order_line"]],
-        )
-        log.info("Order %s readback: %s", order_id, order_data)
-        return order_id, order_data[0] if order_data else {}
+    order_data = client.execute_kw(
+        "sale.order",
+        "read",
+        [[order_id], ["name", "order_line"]],
+    )
+    log.info("Order %s readback: %s", order_id, order_data)
+    return order_id, order_data[0] if order_data else {}
 
 
 def create_sale_order_from_text(po_response: str) -> tuple[int, dict[str, Any]]:

@@ -40,6 +40,7 @@ class _ImportLogHandler(logging.Handler):
     def __init__(self, collector: list[str]):
         super().__init__()
         self._collector = collector
+        self._saw_warning = False
         self.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
 
     def emit(self, record: logging.LogRecord) -> None:
@@ -47,6 +48,12 @@ class _ImportLogHandler(logging.Handler):
             self._collector.append(self.format(record))
         except Exception:
             self._collector.append(record.getMessage())
+        if record.levelno >= logging.WARNING:
+            self._saw_warning = True
+
+    @property
+    def saw_warning(self) -> bool:
+        return self._saw_warning
 
 
 # ----------------------------
@@ -147,6 +154,7 @@ def handle_upload(file_path: str, salesperson: str) -> Tuple[str, str, str]:
                 import_messages.append(f"Odoo sale order creation failed: {exc}")
             finally:
                 if _ODOO_IMPORT_ENABLED:
+                    saw_warning = import_log_handler.saw_warning
                     odoo_logger.removeHandler(import_log_handler)
                     import_log_handler.close()
                     if collected_logs:
@@ -155,6 +163,17 @@ def handle_upload(file_path: str, salesperson: str) -> Tuple[str, str, str]:
                             if entry and entry not in unique_messages:
                                 unique_messages.append(entry)
                         import_messages = unique_messages
+                        if saw_warning:
+                            log_path = Path(__file__).with_name("app_so_import.log")
+                            new_content = "\n".join(import_messages)
+                            if new_content:
+                                new_content = f"{new_content}\n"
+                            if log_path.exists():
+                                existing = log_path.read_text(encoding="utf-8")
+                                merged = f"{new_content}\n{existing}" if existing else new_content
+                            else:
+                                merged = new_content
+                            log_path.write_text(merged, encoding="utf-8")
         else:
             import_messages.append("Odoo import skipped: ODOO_IMPORT flag is not set to true.")
 
