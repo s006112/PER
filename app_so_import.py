@@ -33,6 +33,22 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 _SHOW_PO_TEXTBOXES = _env_flag("DEBUG_TEXTBOXES", False)
 _ODOO_IMPORT_ENABLED = _env_flag("ODOO_IMPORT", False)
 
+
+class _ImportLogHandler(logging.Handler):
+    """Capture log records and format them for display in the import log textbox."""
+
+    def __init__(self, collector: list[str]):
+        super().__init__()
+        self._collector = collector
+        self.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            self._collector.append(self.format(record))
+        except Exception:
+            self._collector.append(record.getMessage())
+
+
 # ----------------------------
 # OpenAI helper
 # ----------------------------
@@ -99,9 +115,11 @@ def handle_upload(file_path: str, salesperson: str) -> Tuple[str, str, str]:
         openai_po_response = f"{header_line}\n{sanitized_response}" if sanitized_response else header_line
         if _ODOO_IMPORT_ENABLED:
             try:
+                collected_logs: list[str] = []
+                odoo_logger = logging.getLogger("app_odoo")
+                import_log_handler = _ImportLogHandler(collected_logs)
+                odoo_logger.addHandler(import_log_handler)
                 order_id, order_data = create_sale_order_from_text(openai_po_response)
-                creation_message = f"Created Odoo sale order ID: {order_id}"
-                import_messages.append(creation_message)
 
                 order_name = ""
                 if isinstance(order_data, dict):
@@ -111,12 +129,11 @@ def handle_upload(file_path: str, salesperson: str) -> Tuple[str, str, str]:
                     import_messages.append("Attachment skipped: missing sale order name from Odoo response.")
                 else:
                     try:
-                        attachment_id = attach_pdf_to_sale_order(
+                        attach_pdf_to_sale_order(
                             sale_order_identifier=order_name,
                             pdf_path=file_path,
                             note_body="Attached customer PO",
                         )
-                        import_messages.append(f"Attached PDF as ir.attachment {attachment_id}")
                     except Exception as attach_exc:
                         log.exception(
                             "Failed to attach PDF '%s' to sale order %s: %s",
@@ -128,6 +145,16 @@ def handle_upload(file_path: str, salesperson: str) -> Tuple[str, str, str]:
             except Exception as exc:
                 log.exception("Odoo sale order creation failed: %s", exc)
                 import_messages.append(f"Odoo sale order creation failed: {exc}")
+            finally:
+                if _ODOO_IMPORT_ENABLED:
+                    odoo_logger.removeHandler(import_log_handler)
+                    import_log_handler.close()
+                    if collected_logs:
+                        unique_messages: list[str] = []
+                        for entry in import_messages + collected_logs:
+                            if entry and entry not in unique_messages:
+                                unique_messages.append(entry)
+                        import_messages = unique_messages
         else:
             import_messages.append("Odoo import skipped: ODOO_IMPORT flag is not set to true.")
 

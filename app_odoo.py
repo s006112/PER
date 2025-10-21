@@ -127,8 +127,21 @@ def _normalize_value(raw_value: str) -> str:
     return _NORMALIZE_PATTERN.sub("", raw_value.casefold())
 
 
-def _select_candidate(candidates: list[tuple[int, str, str]]) -> int:
-    return min(candidates, key=lambda item: (len(item[1]), item[1], item[0]))[0]
+def _select_candidate(
+    candidates: list[tuple[int, str, str]],
+    *,
+    model: str,
+    input_value: str,
+    normalized_input: str,
+) -> int:
+    selected_candidate = min(candidates, key=lambda item: (len(item[1]), item[1], item[0]))
+    if selected_candidate[1] != normalized_input:
+        log.warning(
+            "[[%s]] not exactly found in Odoo system, replaced by [[%s]]",
+            input_value,
+            selected_candidate[2],
+        )
+    return selected_candidate[0]
 
 
 def _fetch_candidates_for_field(
@@ -278,7 +291,12 @@ def find_id(
 
         if field_best_map:
             if field_best_length == len(normalized_input):
-                return _select_candidate(list(field_best_map.values()))
+                return _select_candidate(
+                    list(field_best_map.values()),
+                    model=model,
+                    input_value=input_value,
+                    normalized_input=normalized_input,
+                )
             if field_best_length > best_match_length:
                 best_match_length = field_best_length
                 best_match_candidates = field_best_map.copy()
@@ -287,7 +305,12 @@ def find_id(
                     best_match_candidates.setdefault(candidate[0], candidate)
 
     if best_match_candidates:
-        return _select_candidate(list(best_match_candidates.values()))
+        return _select_candidate(
+            list(best_match_candidates.values()),
+            model=model,
+            input_value=input_value,
+            normalized_input=normalized_input,
+        )
 
     # No candidates ever matched across all fields.
     raise ValueError(f"No '{model}' record matches '{input_value}'.")
@@ -334,7 +357,7 @@ def parse_po_response_text(po_response: str) -> dict[str, Any]:
 
 def create_sale_order(po_data: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     client = get_odoo_client()
-    default_company_name = os.getenv("ODOO_DEFAULT_COMPANY_NAME")
+    # default_company_name = os.getenv("ODOO_DEFAULT_COMPANY_NAME")
     customer_value = str(po_data["customer"])
     customer_has_acuity = "acuity" in customer_value.lower()
     customer_id = find_id(client, "res.partner", customer_value, fields=["name"])
