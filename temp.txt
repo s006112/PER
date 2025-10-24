@@ -394,3 +394,13 @@ Fixed field order and naming as defined
 No inferred or guessed data; only parsed text
 • Style: Professional, concise, deterministic, and format-strict
 
+
+
+
+・If "Good Earth Lighting" appears anywhere in the document, always set it as self.customer with highest priority regardless of other address-based rules.
+If the extracted customer field is based solely on an address and matches a known warehouse, shipping location, or lacks typical customer headers, re-evaluate and consider other entities with full name headers (e.g., top of page, company letterhead) as the actual customer.
+Prioritize company names appearing near the document title or "Purchase Order" heading as the true customer when address-only entities appear later in the document.
+If a candidate customer is detected based only on an address block (e.g., lacking company name context), and another entity appears earlier in the document with both name and contact details, prefer the latter as the customer.
+Avoid assigning entities with only shipping or warehouse-style addresses (e.g., lacking company identifiers or found under "Ship To") as the customer; instead, look for earlier sender identity as more likely customer.
+If the customer is inferred solely from a shipping address, verify whether it may represent a warehouse or logistics location; prefer named entities appearing in the document header or company letterhead as the actual customer.
+When multiple parties are present, prioritize the entity prominently featured at the top or associated with contact details as the customer over those listed under shipping or delivery sections.

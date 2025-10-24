@@ -32,6 +32,8 @@ log = logging.getLogger("app")
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 _SHOW_PO_TEXTBOXES = _env_flag("DEBUG_TEXTBOXES", False)
 _ODOO_IMPORT_ENABLED = _env_flag("ODOO_IMPORT", False)
+_PO_RESPONSE_DEBUG = _env_flag("PO_RESPONSE_DEBUG", False)
+_DEBUG_PDF_PARSING_TEXT = os.getenv("pdf_parsing_text", "")
 
 
 class _ImportLogHandler(logging.Handler):
@@ -94,16 +96,22 @@ def handle_upload(file_path: str, salesperson: str) -> Tuple[str, str, str]:
         return "Error: Sales person is required.", "", ""
 
     salesperson_value = salesperson.strip()
-    if not file_path or not os.path.isfile(file_path):
-        return "Error: No file found.", "", ""
+    if not _PO_RESPONSE_DEBUG:
+        if not file_path or not os.path.isfile(file_path):
+            return "Error: No file found.", "", ""
 
-    with open(file_path, "rb") as f:
-        data = f.read()
+    if _PO_RESPONSE_DEBUG:
+        pdf_parsing_text = _DEBUG_PDF_PARSING_TEXT
+        if not pdf_parsing_text:
+            return "Error: Debug mode requires pdf_parsing_text in .env.", "", ""
+    else:
+        with open(file_path, "rb") as f:
+            data = f.read()
 
-    pdf_pages = _extract_text_with_pymupdf(data)
-    if not pdf_pages:
-        return "Error: PDF parsing failed.", "", ""
-    pdf_parsing_text = "\n\n".join(pdf_pages.values())
+        pdf_pages = _extract_text_with_pymupdf(data)
+        if not pdf_pages:
+            return "Error: PDF parsing failed.", "", ""
+        pdf_parsing_text = "\n\n".join(pdf_pages.values())
 
     base_dir = Path(__file__).parent
     try:
@@ -136,11 +144,14 @@ def handle_upload(file_path: str, salesperson: str) -> Tuple[str, str, str]:
                     import_messages.append("Attachment skipped: missing sale order name from Odoo response.")
                 else:
                     try:
-                        attach_pdf_to_sale_order(
-                            sale_order_identifier=order_name,
-                            pdf_path=file_path,
-                            note_body="Attached customer PO",
-                        )
+                        if file_path and os.path.isfile(file_path):
+                            attach_pdf_to_sale_order(
+                                sale_order_identifier=order_name,
+                                pdf_path=file_path,
+                                note_body="Attached customer PO",
+                            )
+                        else:
+                            import_messages.append("Attachment skipped: no PDF file provided.")
                     except Exception as attach_exc:
                         log.exception(
                             "Failed to attach PDF '%s' to sale order %s: %s",

@@ -36,6 +36,7 @@ Delivery Date: From Requested/Required/Ship/Delivery Date; standardize to YYYY-M
 Extraction Rules:
 Detect headers using synonyms above.
 Identify company and customer by address: Hong Kong/Ampco → Company; Overseas → Customer.
+If "Good Earth Lighting" appears anywhere in the document, always set it as self.customer with highest priority regardless of other address-based rules.
 Merge tables and pages in reading order; remove formatting marks or symbols.
 Normalize dates and numbers; ensure one continuous, gap-free order list.
 Every order line must include product, quantity, and delivery date; fill using the most relevant parsed value if label variations exist.
