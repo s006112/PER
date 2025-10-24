@@ -11,7 +11,6 @@ from typing import Callable, List, Tuple
 
 import fitz  # PyMuPDF：用於處理 PDF 文件的主要函式庫
 import ocrmypdf  # OCR fallback for image-based PDFs
-from chunk_san import sanitize_text  # 自訂的文字清洗函數，用來淨化提取出的 PDF 文字
 
 logger = logging.getLogger(__name__)  # 初始化日誌記錄器
 
@@ -36,14 +35,12 @@ def _extract_text_with_pymupdf(data: bytes) -> dict[int, str]:
 
     def _run_extraction(pdf_bytes: bytes) -> dict[int, str]:
         with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
-            return {
-                i: sanitize_text(t)
-                for i, t in (
-                    (n, p.get_text("text", sort=True).strip())
-                    for n, p in enumerate(doc, 1)
-                )
-                if t
-            }
+            pages: dict[int, str] = {}
+            for idx, page in enumerate(doc, start=1):
+                text = page.get_text()
+                if text and text.strip():
+                    pages[idx] = text
+            return pages
 
     try:
         pages = _run_extraction(data)
