@@ -154,28 +154,24 @@ def find_id(
                 candidate_map = {candidate[0]: candidate for candidate in active_set}
                 if log.isEnabledFor(logging.WARNING):
                     log.warning(
-                        "Window match | model=%s field=%s input=%s window=%s window_end=%d candidates=%s",
-                        model,
+                        "Match | field=%s candidates=%s",
                         field,
-                        input_value,
-                        window,
-                        window_end,
                         [
                             {"id": candidate[0], "normalized": candidate[1], "value": candidate[2]}
                             for candidate in candidate_map.values()
                         ],
                     )
                 current_set = active_set
-                return _select_candidate(
-                    list(candidate_map.values()),
-                    model=model,
-                    input_value=input_value,
-                    normalized_input=normalized_input,
-                )
+                if window_end > field_best_length:
+                    field_best_length = window_end
+                    field_best_map = candidate_map.copy()
+                elif window_end == field_best_length and field_best_length:
+                    for candidate_id, candidate in candidate_map.items():
+                        field_best_map.setdefault(candidate_id, candidate)
             else:
                 if log.isEnabledFor(logging.WARNING):
                     log.warning(
-                        "Window mismatch | model=%s field=%s input=%s window=%s window_end=%d",
+                        "Mismatch | model=%s field=%s input=%s window=%s window_end=%d",
                         model,
                         field,
                         input_value,
@@ -186,13 +182,6 @@ def find_id(
                 continue
 
         if field_best_map:
-            if field_best_length == len(normalized_input):
-                return _select_candidate(
-                    list(field_best_map.values()),
-                    model=model,
-                    input_value=input_value,
-                    normalized_input=normalized_input,
-                )
             if field_best_length > best_match_length:
                 best_match_length = field_best_length
                 best_match_candidates = field_best_map.copy()
