@@ -153,32 +153,32 @@ def find_id(
                 continue
             current_set = field_current[field]
             filtered = [candidate for candidate in current_set if window in candidate[1]]
-            if filtered:
-                prefix_filtered = [candidate for candidate in filtered if candidate[1].startswith(window)]
-                active_set = prefix_filtered or filtered
-                if log.isEnabledFor(logging.WARNING):
-                    log.warning(
-                        "Match | field=%s window=%s candidates=%s",
-                        field,
-                        window,
-                        [
-                            {"id": candidate[0], "normalized": candidate[1], "value": candidate[2]}
-                            for candidate in active_set
-                        ],
-                    )
+            prefix_filtered = [candidate for candidate in filtered if candidate[1].startswith(window)]
+            active_set = prefix_filtered or filtered
+            matched = bool(active_set)
+            log.warning(
+                " %s | %s | %s | %s | %d | %s | %s",
+                model,
+                field,
+                input_value,
+                window,
+                window_end,
+                matched,
+                "\n"
+                + str(
+                    [
+                        {"id": candidate[0], "normalized": candidate[1], "value": candidate[2]}
+                        for candidate in active_set
+                    ]
+                )
+                if matched
+                else None,
+            )
+            if matched:
                 for candidate in active_set:
                     aggregated_candidates.setdefault(candidate[0], candidate)
                 field_current[field] = active_set
             else:
-                if log.isEnabledFor(logging.WARNING):
-                    log.warning(
-                        "Mismatch | model=%s field=%s input=%s window=%s window_end=%d",
-                        model,
-                        field,
-                        input_value,
-                        window,
-                        window_end,
-                    )
                 field_current[field] = base_candidates
         if aggregated_candidates:
             return _select_candidate(
