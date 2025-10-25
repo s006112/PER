@@ -11,7 +11,8 @@ log = logging.getLogger("app_odoo")
 
 _NORMALIZE_PATTERN = re.compile(r"[\W_]+", re.UNICODE)
 
-
+# Normalize a raw string into a casefolded, alphanumeric token for comparison.
+# Example: _normalize_value(" ACME-123 ") -> "acme123"
 def _normalize_value(raw_value: str) -> str:
     return _NORMALIZE_PATTERN.sub("", raw_value.casefold())
 
@@ -24,12 +25,12 @@ def _select_candidate(
     normalized_input: str,
 ) -> int:
     selected_candidate = min(candidates, key=lambda item: (len(item[1]), item[1], item[0]))
-    if selected_candidate[1] != normalized_input:
-        log.warning(
-            "[[%s]] not exactly found in Odoo system, replaced by [[%s]]",
-            input_value,
-            selected_candidate[2],
-        )
+#    if selected_candidate[1] != normalized_input:
+#        log.warning(
+#            "[[%s]] not exactly found in Odoo system, replaced by [[%s]]",
+#            input_value,
+#            selected_candidate[2],
+#        )
     return selected_candidate[0]
 
 
@@ -118,15 +119,6 @@ def find_id(
     fields: list[str],
     limit: int = 100,
 ) -> int:
-    """
-    Resolve an Odoo record ID using progressive prefix filtering across the given fields.
-
-    The search starts with candidates fetched via ``search_read`` for each field (in order),
-    then filters them by progressively extending the normalized input prefix. If a normalized
-    exact match is found for any candidate, its ID is returned immediately. Otherwise, the
-    winner is chosen deterministically using shortest normalized length, lexicographical order,
-    then lowest record ID.
-    """
     if not fields:
         raise ValueError("At least one field must be provided to locate record IDs.")
     if not input_value:
@@ -149,10 +141,6 @@ def find_id(
         if not candidates:
             continue
 
-        for candidate in candidates:
-            if candidate[1] == normalized_input:
-                return candidate[0]
-
         base_candidates = candidates
         current_set = candidates
         field_best_length = 0
@@ -163,14 +151,37 @@ def find_id(
             if filtered:
                 prefix_filtered = [candidate for candidate in filtered if candidate[1].startswith(window)]
                 active_set = prefix_filtered or filtered
+                candidate_map = {candidate[0]: candidate for candidate in active_set}
+                if log.isEnabledFor(logging.WARNING):
+                    log.warning(
+                        "Window match | model=%s field=%s input=%s window=%s window_end=%d candidates=%s",
+                        model,
+                        field,
+                        input_value,
+                        window,
+                        window_end,
+                        [
+                            {"id": candidate[0], "normalized": candidate[1], "value": candidate[2]}
+                            for candidate in candidate_map.values()
+                        ],
+                    )
                 current_set = active_set
-                if window_end > field_best_length:
-                    field_best_length = window_end
-                    field_best_map = {candidate[0]: candidate for candidate in active_set}
-                elif window_end == field_best_length and field_best_length:
-                    for candidate in active_set:
-                        field_best_map.setdefault(candidate[0], candidate)
+                return _select_candidate(
+                    list(candidate_map.values()),
+                    model=model,
+                    input_value=input_value,
+                    normalized_input=normalized_input,
+                )
             else:
+                if log.isEnabledFor(logging.WARNING):
+                    log.warning(
+                        "Window mismatch | model=%s field=%s input=%s window=%s window_end=%d",
+                        model,
+                        field,
+                        input_value,
+                        window,
+                        window_end,
+                    )
                 current_set = base_candidates
                 continue
 
