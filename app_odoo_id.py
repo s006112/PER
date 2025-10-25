@@ -126,9 +126,8 @@ def find_id(
     normalized_input = _normalize_value(input_value)
     if not normalized_input:
         raise ValueError(f"Input '{input_value}' is invalid after normalization.")
-    best_match_length = 0
-    best_match_candidates: dict[int, tuple[int, str, str]] = {}
-
+    field_candidates: dict[str, list[tuple[int, str, str]]] = {}
+    field_current: dict[str, list[tuple[int, str, str]]] = {}
     for field in fields:
         candidates = _fetch_candidates_for_field(
             client,
@@ -137,37 +136,39 @@ def find_id(
             input_value,
             limit,
         )
-
         if not candidates:
             continue
+        field_candidates[field] = candidates
+        field_current[field] = candidates
 
-        base_candidates = candidates
-        current_set = candidates
-        field_best_length = 0
-        field_best_map: dict[int, tuple[int, str, str]] = {}
-        for window_end in range(len(normalized_input), 0, -1):
-            window = normalized_input[:window_end]
+    if not field_candidates:
+        raise ValueError(f"No '{model}' record matches '{input_value}'.")
+
+    for window_end in range(len(normalized_input), 0, -1):
+        window = normalized_input[:window_end]
+        aggregated_candidates: dict[int, tuple[int, str, str]] = {}
+        for field in fields:
+            base_candidates = field_candidates.get(field)
+            if not base_candidates:
+                continue
+            current_set = field_current[field]
             filtered = [candidate for candidate in current_set if window in candidate[1]]
             if filtered:
                 prefix_filtered = [candidate for candidate in filtered if candidate[1].startswith(window)]
                 active_set = prefix_filtered or filtered
-                candidate_map = {candidate[0]: candidate for candidate in active_set}
                 if log.isEnabledFor(logging.WARNING):
                     log.warning(
-                        "Match | field=%s candidates=%s",
+                        "Match | field=%s window=%s candidates=%s",
                         field,
+                        window,
                         [
                             {"id": candidate[0], "normalized": candidate[1], "value": candidate[2]}
-                            for candidate in candidate_map.values()
+                            for candidate in active_set
                         ],
                     )
-                current_set = active_set
-                if window_end > field_best_length:
-                    field_best_length = window_end
-                    field_best_map = candidate_map.copy()
-                elif window_end == field_best_length and field_best_length:
-                    for candidate_id, candidate in candidate_map.items():
-                        field_best_map.setdefault(candidate_id, candidate)
+                for candidate in active_set:
+                    aggregated_candidates.setdefault(candidate[0], candidate)
+                field_current[field] = active_set
             else:
                 if log.isEnabledFor(logging.WARNING):
                     log.warning(
@@ -178,24 +179,14 @@ def find_id(
                         window,
                         window_end,
                     )
-                current_set = base_candidates
-                continue
-
-        if field_best_map:
-            if field_best_length > best_match_length:
-                best_match_length = field_best_length
-                best_match_candidates = field_best_map.copy()
-            elif field_best_length == best_match_length:
-                for candidate in field_best_map.values():
-                    best_match_candidates.setdefault(candidate[0], candidate)
-
-    if best_match_candidates:
-        return _select_candidate(
-            list(best_match_candidates.values()),
-            model=model,
-            input_value=input_value,
-            normalized_input=normalized_input,
-        )
+                field_current[field] = base_candidates
+        if aggregated_candidates:
+            return _select_candidate(
+                list(aggregated_candidates.values()),
+                model=model,
+                input_value=input_value,
+                normalized_input=normalized_input,
+            )
 
     raise ValueError(f"No '{model}' record matches '{input_value}'.")
 
