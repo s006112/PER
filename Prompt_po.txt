@@ -8,8 +8,8 @@ Input:
 PyMuPDF parsed text blocks with reading order and table structures (rows, columns, spans) if available
 
 Field Mapping for Odoo:
-- Company: Always appeared as "Ampco", or from Company/Supplier/Vendor section.
-- Customer: Always appeared in header, or Customer/Sold To/Bill To section
+- Customer: Always consider header, unless obvious contradiction with the context.
+- Company: Always appeared as "Ampco", or non header name, or from Company/Supplier/Vendor section.
 - Customer PO Number: Always from PO No./Customer PO Number/Purchase Order No.
 - Product: From Item/Product Code/Part No.; keep only short code, description.
 - Quantity: From Qty/QTY/Quantity Ordered; numeric only.
@@ -31,8 +31,8 @@ Output:
 Output: A single continuous plain-text document containing only parsed content (no metadata, JSON, XML, CSV, or page markers).
 
 Output format (exact order and structure, example in "" for illustration only):
-    self.company = "Ampco Products Limited"
     self.customer = "Focal Point, LLC"
+    self.company = "Ampco Products Limited"
     self.x_studio_customer_po_number = "PO-001"
     self.order_lines = [
         {

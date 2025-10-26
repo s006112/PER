@@ -18,10 +18,11 @@ def _fetch_candidates_for_field(
     model: str,
     field: str,
     input_value: str,
-) -> list[tuple[int, str, str]]:
+) -> tuple[list[tuple[int, str, str]], int]:
     stripped_input = input_value.strip()
     candidates: list[tuple[int, str, str]] = []
     seen_ids: set[int] = set()
+    matched_length = 0
 
     def add_records(records: list[dict[str, Any]]) -> None:
         for record in records:
@@ -48,12 +49,20 @@ def _fetch_candidates_for_field(
         return bool(candidates)
 
     if stripped_input:
-        for substring_length in range(len(stripped_input), 0, -1):
-            substring = stripped_input[:substring_length]
-            if fetch([[field, "ilike", f"%{substring}%"]]):
-                return candidates
+        total_length = len(stripped_input)
+        seen_substrings: set[str] = set()
+        for substring_length in range(total_length, 0, -1):
+            max_left_trim = total_length - substring_length
+            for left_trim in range(0, max_left_trim + 1):
+                substring = stripped_input[left_trim : left_trim + substring_length]
+                if substring in seen_substrings:
+                    continue
+                seen_substrings.add(substring)
+                if fetch([[field, "ilike", f"%{substring}%"]]):
+                    matched_length = substring_length
+                    return candidates, matched_length
 
-    return candidates
+    return candidates, matched_length
 
 
 def find_id(
@@ -65,9 +74,9 @@ def find_id(
 ) -> int:
     normalized_input = _normalize_value(input_value)
     field_candidates: dict[str, list[tuple[int, str, str]]] = {}
-    field_current: dict[str, list[tuple[int, str, str]]] = {}
+    field_match_lengths: dict[str, int] = {}
     for field in fields:
-        candidates = _fetch_candidates_for_field(
+        candidates, match_length = _fetch_candidates_for_field(
             client,
             model,
             field,
@@ -88,50 +97,46 @@ def find_id(
         if not candidates:
             continue
         field_candidates[field] = candidates
-        field_current[field] = candidates
-
-    for window_end in range(len(normalized_input), 0, -1):
-        window = normalized_input[:window_end]
-        aggregated_candidates: dict[int, tuple[int, str, str]] = {}
-        for field in fields:
-            base_candidates = field_candidates.get(field)
-            if not base_candidates:
-                continue
-            current_set = field_current[field]
-            filtered = [candidate for candidate in current_set if window in candidate[1]]
-            prefix_filtered = [candidate for candidate in filtered if candidate[1].startswith(window)]
-            active_set = prefix_filtered or filtered
-            matched = bool(active_set)
-            log.warning(
-                " %s | %s | %s | %s | %d | %s | %s",
-                model,
-                field,
-                input_value,
-                window,
-                window_end,
-                matched,
-                "\n"
-                + str(
-                    [
-                        {"id": candidate[0], "normalized": candidate[1], "value": candidate[2]}
-                        for candidate in active_set
-                    ]
-                )
-                if matched
-                else None,
-            )
-            if matched:
-                for candidate in active_set:
-                    aggregated_candidates.setdefault(candidate[0], candidate)
-                field_current[field] = active_set
-            else:
-                field_current[field] = base_candidates
-        if aggregated_candidates:
-            selected = min(
-                aggregated_candidates.values(),
-                key=lambda item: (len(item[1]), item[1], item[0]),
-            )
-            return selected[0]
+        field_match_lengths[field] = match_length
+    best_match_length = max(field_match_lengths.values(), default=0)
+    aggregated_candidates: dict[int, tuple[int, str, str]] = {}
+    for field in fields:
+        candidates = field_candidates.get(field)
+        if not candidates:
+            continue
+        match_length = field_match_lengths.get(field, 0)
+        if best_match_length > 0 and match_length < best_match_length:
+            continue
+        filtered = [
+            candidate
+            for candidate in candidates
+            if normalized_input
+            and (normalized_input in candidate[1] or candidate[1] in normalized_input)
+        ]
+        active_set = filtered or candidates
+        log.warning(
+            " %s | %s | %s | %s | %d | %s",
+            model,
+            field,
+            input_value,
+            normalized_input,
+            match_length,
+            "\n"
+            + str(
+                [
+                    {"id": candidate[0], "normalized": candidate[1], "value": candidate[2]}
+                    for candidate in active_set
+                ]
+            ),
+        )
+        for candidate in active_set:
+            aggregated_candidates.setdefault(candidate[0], candidate)
+    if aggregated_candidates:
+        selected = min(
+            aggregated_candidates.values(),
+            key=lambda item: (len(item[1]), item[1], item[0]),
+        )
+        return selected[0]
 
 
 __all__ = ["find_id"]
