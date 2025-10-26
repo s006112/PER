@@ -1,7 +1,35 @@
-Extract and consolidate structured purchase order data (lighting products trading context) from PyMuPDF-parsed text of customer PO PDFs into a single plain text document formatted for Odoo ERP sales order import
-Background: PDFs may contain multiple pages, mixed tables, headers, and revisions; requirement is a coherent, page-break-free consolidated text
-Input: PyMuPDF parsed text blocks with reading order and table structures (rows, columns, spans) if available
-Output: One continuous plain text document, no metadata/JSON/XML/CSV, no page break markers, no invented data, only parsed content
+Task: 
+Extract and merge structured purchase order data from PyMuPDF-parsed customer PO PDFs (lighting products context) into one plain text file formatted for Odoo ERP sales order import
+
+Background: 
+PDFs may span multiple pages with mixed tables and headers; output must be one continuous, page-break-free consolidated text
+
+Input: 
+PyMuPDF parsed text blocks with reading order and table structures (rows, columns, spans) if available
+
+Field Mapping for Odoo:
+- Company: Always appeared as "Ampco", or from Company/Supplier/Vendor section.
+- Customer: Always appeared in header, or Customer/Sold To/Bill To section
+- Customer PO Number: Always from PO No./Customer PO Number/Purchase Order No.
+- Product: From Item/Product Code/Part No.; keep only short code, description.
+- Quantity: From Qty/QTY/Quantity Ordered; numeric only.
+- Delivery Date: From Requested/Required/Ship/Delivery Date; standardize to YYYY-MM-DD.
+
+Extraction Rules:
+- Identify header fields using the defined label synonyms.
+- Merge tables and pages in reading order; remove formatting marks or symbols.
+- Standardize all dates and quantities; produce a single continuous, gap-free order list.
+- Every order line must include product, quantity, and delivery date; fill using the most relevant parsed value if label variations exist.
+- Generate one uninterrupted plain-text block in the specified field order, directly compatible with Odoo import.
+- Final output must contain all mandatory fields (company, customer, PO number, and at least one valid order line) or be considered incomplete.
+
+Additional data rules:
+- The value of self.customer must never be "Ampco" or any variation of it; if such a value appears, treat it as a mix-up between company and customer names—use other contextual clues to correctly identify the customer
+- If the text includes ‘Good Earth Lighting’, assign it to self.customer.
+
+Output: 
+Output: A single continuous plain-text document containing only parsed content (no metadata, JSON, XML, CSV, or page markers).
+
 Output format (exact order and structure, example in "" for illustration only):
     self.company = "Ampco Products Limited"
     self.customer = "Focal Point, LLC"
@@ -24,24 +52,3 @@ Output format (exact order and structure, example in "" for illustration only):
         },
     ]
     … continue numbering sequentially for all product present
-
-Field Mapping for Odoo:
-Company: Always appeared as "Ampco", or from Company/Supplier/Vendor section.
-Customer: Always appeared in header, or from Customer/Sold To/Bill To section or overseas address (exclude “Ampco”).
-Customer PO Number: From PO No./Customer PO Number/Purchase Order No.
-Product: From Item/Product Code/Part No.; keep only short code, description.
-Quantity: From Qty/QTY/Quantity Ordered; numeric only.
-Delivery Date: From Requested/Required/Ship/Delivery Date; standardize to YYYY-MM-DD.
-
-Extraction Rules:
-Detect headers using synonyms above.
-Identify company and customer by address: Hong Kong/Ampco → Company; Overseas → Customer.
-If "Good Earth Lighting" appears anywhere in the document, always set it as self.customer with highest priority regardless of other address-based rules.
-Merge tables and pages in reading order; remove formatting marks or symbols.
-Normalize dates and numbers; ensure one continuous, gap-free order list.
-Every order line must include product, quantity, and delivery date; fill using the most relevant parsed value if label variations exist.
-Output one plain text block following the defined field order and syntax, ready for Odoo import without interruption.
-Final output must contain all mandatory fields (company, customer, PO number, and at least one valid order line) or be considered incomplete.
-
-Output: 
-Single plain text document, line-break delimited, no markup or metadata, following the defined sequence exactly.

@@ -189,10 +189,7 @@ def handle_upload(file_path: str, salesperson: str) -> Tuple[str, str, str]:
             import_messages.append("Odoo import skipped: ODOO_IMPORT flag is not set to true.")
 
     import_log_message = "\n".join(import_messages)
-    if import_log_message:
-        pdf_output = f"{pdf_parsing_text}\n\n{import_log_message}" if pdf_parsing_text else import_log_message
-    else:
-        pdf_output = pdf_parsing_text
+    pdf_output = pdf_parsing_text
 
     return openai_po_response, pdf_output, import_log_message
 

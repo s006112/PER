@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Iterable
 
 if TYPE_CHECKING:
     from app_odoo import OdooClient
@@ -34,43 +34,53 @@ def _select_candidate(
     return selected_candidate[0]
 
 
+def _iter_window_indices(max_start: int) -> Iterable[int]:
+    yield 0
+    for index in range(1, max_start + 1):
+        yield index
+
+
+def _add_candidate_records(
+    records: Iterable[dict[str, Any]],
+    *,
+    field: str,
+    candidates: list[tuple[int, str, str]],
+    seen_ids: set[int],
+) -> None:
+    for record in records:
+        record_id = int(record["id"])
+        if record_id in seen_ids:
+            continue
+        raw_value = record.get(field)
+        if not raw_value:
+            continue
+        normalized_value = _normalize_value(str(raw_value))
+        if not normalized_value:
+            continue
+        candidates.append((record_id, normalized_value, str(raw_value)))
+        seen_ids.add(record_id)
+
+
 def _fetch_candidates_for_field(
     client: "OdooClient",
     model: str,
     field: str,
     input_value: str,
-    limit: int,
 ) -> list[tuple[int, str, str]]:
     stripped_input = input_value.strip()
     candidates: list[tuple[int, str, str]] = []
     seen_ids: set[int] = set()
-
-    def add_records(records: list[dict[str, Any]]) -> bool:
-        for record in records:
-            record_id = int(record["id"])
-            if record_id in seen_ids:
-                continue
-            raw_value = record.get(field)
-            if not raw_value:
-                continue
-            normalized_value = _normalize_value(str(raw_value))
-            if not normalized_value:
-                continue
-            candidates.append((record_id, normalized_value, str(raw_value)))
-            seen_ids.add(record_id)
-            if len(candidates) >= limit:
-                return True
-        return False
 
     if stripped_input:
         exact_records = client.execute_kw(
             model,
             "search_read",
             [[[field, "=", stripped_input]]],
-            {"fields": [field], "limit": limit},
+            {"fields": [field]},
         )
-        if add_records(exact_records):
-            return candidates
+        _add_candidate_records(
+            exact_records, field=field, candidates=candidates, seen_ids=seen_ids
+        )
         if candidates:
             log.warning(
                 "Exact '=' match produced candidates for stripped %r (normalized %r); skipping substring windows",
@@ -91,13 +101,11 @@ def _fetch_candidates_for_field(
                 normalized_stripped,
             )
             max_start = length - substring_length
-            start_indices = [0]
             # 如果有空隙，则允许窗口向右滑动
             if max_start:
                 log.warning("Window length %d allows %d total positions", substring_length, max_start + 1)
-                start_indices.extend(range(1, max_start + 1))
             # 针对该长度的每个起点尝试查询
-            for start_index in start_indices:
+            for start_index in _iter_window_indices(max_start):
                 substring = stripped_input[start_index : start_index + substring_length]
                 normalized_substring = _normalize_value(substring)
                 log.warning(
@@ -123,12 +131,11 @@ def _fetch_candidates_for_field(
                     model,
                     "search_read",
                     [[[field, "ilike", f"%{substring}%"]]],
-                    {"fields": [field], "limit": limit},
+                    {"fields": [field]},
                 )
-                # 一旦填满候选，就可以提前返回
-                if add_records(substring_records):
-                    log.warning("Candidates filled using window %r (normalized %r)", substring, normalized_substring)
-                    return candidates
+                _add_candidate_records(
+                    substring_records, field=field, candidates=candidates, seen_ids=seen_ids
+                )
                 if len(candidates) > before_count:
                     log.warning(
                         "Candidates found using window %r (normalized %r); skipping smaller windows",
@@ -153,10 +160,11 @@ def _fetch_candidates_for_field(
             model,
             "search_read",
             [[[field, "ilike", wildcard]]],
-            {"fields": [field], "limit": limit},
+            {"fields": [field]},
         )
-        if add_records(wildcard_records):
-            return candidates
+        _add_candidate_records(
+            wildcard_records, field=field, candidates=candidates, seen_ids=seen_ids
+        )
         if candidates:
             return candidates
 
@@ -165,11 +173,70 @@ def _fetch_candidates_for_field(
             model,
             "search_read",
             [[[field, "ilike", stripped_input]]],
-            {"fields": [field], "limit": limit},
+            {"fields": [field]},
         )
-        add_records(fuzzy_records)
+        _add_candidate_records(
+            fuzzy_records, field=field, candidates=candidates, seen_ids=seen_ids
+        )
 
     return candidates
+
+
+def _resolve_with_fields(
+    field_candidates: dict[str, list[tuple[int, str, str]]],
+    active_fields: Iterable[str],
+    *,
+    model: str,
+    input_value: str,
+    normalized_input: str,
+) -> int | None:
+    field_order = list(active_fields)
+    if not field_order:
+        return None
+    normalized_length = len(normalized_input)
+    for window_size in range(normalized_length, 0, -1):
+        max_start = normalized_length - window_size
+        for start_index in _iter_window_indices(max_start):
+            window = normalized_input[start_index : start_index + window_size]
+            aggregated_candidates: dict[int, tuple[int, str, str]] = {}
+            for field in field_order:
+                base_candidates = field_candidates.get(field)
+                if not base_candidates:
+                    continue
+                filtered = [candidate for candidate in base_candidates if window in candidate[1]]
+                prefix_filtered = [candidate for candidate in filtered if candidate[1].startswith(window)]
+                active_set = prefix_filtered or filtered
+                matched = bool(active_set)
+                log.warning(
+                    " %s | %s | %s | %s | %d | %d | %s | %s",
+                    model,
+                    field,
+                    input_value,
+                    window,
+                    window_size,
+                    start_index,
+                    matched,
+                    "\n"
+                    + str(
+                        [
+                            {"id": candidate[0], "normalized": candidate[1], "value": candidate[2]}
+                            for candidate in active_set
+                        ]
+                    )
+                    if matched
+                    else None,
+                )
+                if matched:
+                    for candidate in active_set:
+                        aggregated_candidates.setdefault(candidate[0], candidate)
+            if aggregated_candidates:
+                return _select_candidate(
+                    list(aggregated_candidates.values()),
+                    model=model,
+                    input_value=input_value,
+                    normalized_input=normalized_input,
+                )
+    return None
 
 
 def find_id(
@@ -178,7 +245,6 @@ def find_id(
     input_value: str,
     *,
     fields: list[str],
-    limit: int = 100,
 ) -> int:
     if not fields:
         raise ValueError("At least one field must be provided to locate record IDs.")
@@ -189,62 +255,12 @@ def find_id(
         raise ValueError(f"Input '{input_value}' is invalid after normalization.")
     field_candidates: dict[str, list[tuple[int, str, str]]] = {}
     processed_fields: list[str] = []
-
-    def resolve_with_fields(active_fields: list[str]) -> int | None:
-        if not active_fields:
-            return None
-        normalized_length = len(normalized_input)
-        for window_size in range(normalized_length, 0, -1):
-            max_start = normalized_length - window_size
-            for start_index in range(max_start + 1):
-                window = normalized_input[start_index : start_index + window_size]
-                aggregated_candidates: dict[int, tuple[int, str, str]] = {}
-                for field in active_fields:
-                    base_candidates = field_candidates.get(field)
-                    if not base_candidates:
-                        continue
-                    filtered = [candidate for candidate in base_candidates if window in candidate[1]]
-                    prefix_filtered = [candidate for candidate in filtered if candidate[1].startswith(window)]
-                    active_set = prefix_filtered or filtered
-                    matched = bool(active_set)
-                    log.warning(
-                        " %s | %s | %s | %s | %d | %d | %s | %s",
-                        model,
-                        field,
-                        input_value,
-                        window,
-                        window_size,
-                        start_index,
-                        matched,
-                        "\n"
-                        + str(
-                            [
-                                {"id": candidate[0], "normalized": candidate[1], "value": candidate[2]}
-                                for candidate in active_set
-                            ]
-                        )
-                        if matched
-                        else None,
-                    )
-                    if matched:
-                        for candidate in active_set:
-                            aggregated_candidates.setdefault(candidate[0], candidate)
-                if aggregated_candidates:
-                    return _select_candidate(
-                        list(aggregated_candidates.values()),
-                        model=model,
-                        input_value=input_value,
-                        normalized_input=normalized_input,
-                    )
-        return None
-
     for field in fields:
         candidates = _fetch_candidates_for_field(
             client,
             model,
             field,
             input_value,
-            limit,
         )
         if not candidates:
             continue
@@ -263,14 +279,26 @@ def find_id(
                     normalized_input=normalized_input,
                 )
         processed_fields.append(field)
-        resolved = resolve_with_fields(processed_fields)
+        resolved = _resolve_with_fields(
+            field_candidates,
+            processed_fields,
+            model=model,
+            input_value=input_value,
+            normalized_input=normalized_input,
+        )
         if resolved is not None:
             return resolved
 
     if not field_candidates:
         raise ValueError(f"No '{model}' record matches '{input_value}'.")
 
-    resolved = resolve_with_fields(fields)
+    resolved = _resolve_with_fields(
+        field_candidates,
+        fields,
+        model=model,
+        input_value=input_value,
+        normalized_input=normalized_input,
+    )
     if resolved is not None:
         return resolved
 
