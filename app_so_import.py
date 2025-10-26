@@ -216,6 +216,14 @@ def handle_upload(file_path: str, salesperson: str) -> Tuple[str, str, str]:
 
     return openai_po_response, pdf_output, import_log_message
 
+
+def _start_processing() -> str:
+    return '<div class="status status-processing">Processing...</div>'
+
+
+def _finish_processing() -> str:
+    return '<div class="status status-complete">Completed.</div>'
+
 # ----------------------------
 # UI
 # ----------------------------
@@ -226,6 +234,7 @@ with gr.Blocks(title="SO importer", head=CLIPBOARD_POLYFILL) as demo:
         salesperson_input = gr.Textbox(label="Sales person", lines=1, placeholder="Enter sales person name")
     btn = gr.Button("Submit")
 
+    status_box = gr.HTML(value="", elem_id="status_box", visible=not _SHOW_PO_TEXTBOXES)
     import_log_box = gr.HTML(value="", elem_id="import_log_box")
 
     po_response_box = gr.Textbox(label="PO response", lines=14, show_copy_button=True, visible=_SHOW_PO_TEXTBOXES)
@@ -238,11 +247,20 @@ with gr.Blocks(title="SO importer", head=CLIPBOARD_POLYFILL) as demo:
         visible=_SHOW_PO_TEXTBOXES,
     )
 
-    # Wire outputs: PO response (visible), raw PDF parsing text (hidden but copyable), and import log
-    btn.click(
+    # Wire outputs with basic progress indicator for non-debug mode
+    submit_event = btn.click(
+        _start_processing,
+        inputs=None,
+        outputs=status_box,
+    )
+    submit_event.then(
         handle_upload,
         inputs=[inp, salesperson_input],
         outputs=[po_response_box, pdf_parsing_box, import_log_box],
+    ).then(
+        _finish_processing,
+        inputs=None,
+        outputs=status_box,
     )
 
 if __name__ == "__main__":
