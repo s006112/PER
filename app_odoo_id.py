@@ -8,14 +8,9 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("app_odoo")
 
-# Normalize a raw string into a casefolded, alphanumeric token for comparison.
-# Example: _normalize_value(" ACME-123 ") -> "acme123"
+# " ACME-123 ") -> "acme123"
 def _normalize_value(raw_value: str) -> str:
     return "".join(ch for ch in raw_value.casefold() if ch.isalnum())
-
-
-# Select the best candidate by shortest normalized value, then lexicographic,
-# then smallest id. Kept inline where used to reduce indirection.
 
 
 def _fetch_candidates_for_field(
@@ -53,9 +48,6 @@ def _fetch_candidates_for_field(
         return bool(candidates)
 
     if stripped_input:
-        if fetch([[field, "=", stripped_input]]):
-            return candidates
-
         for substring_length in range(len(stripped_input), 0, -1):
             substring = stripped_input[:substring_length]
             if fetch([[field, "ilike", f"%{substring}%"]]):
