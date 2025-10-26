@@ -120,6 +120,8 @@ def handle_upload(file_path: str, salesperson: str) -> Tuple[str, str, str]:
         return f"Error reading Prompt_po.txt: {e}", "", ""
     openai_po_response = query_openai_with_prompt(prompt_po_str, pdf_parsing_text)
     import_messages: list[str] = []
+    created_order_name: str | None = None
+    created_order_id: str | None = None
     if openai_po_response and not openai_po_response.startswith("Error"):
         lines_without_salesperson = [
             line for line in openai_po_response.splitlines() if not line.strip().startswith("self.salesperson")
@@ -139,6 +141,10 @@ def handle_upload(file_path: str, salesperson: str) -> Tuple[str, str, str]:
                 order_name = ""
                 if isinstance(order_data, dict):
                     order_name = str(order_data.get("name") or "").strip()
+                if order_name:
+                    created_order_name = order_name
+                if order_id is not None:
+                    created_order_id = str(order_id)
                 if not order_name:
                     log.error("Missing sale order name for order %s; skipping attachment.", order_id)
                     import_messages.append("Attachment skipped: missing sale order name from Odoo response.")
@@ -164,31 +170,38 @@ def handle_upload(file_path: str, salesperson: str) -> Tuple[str, str, str]:
                 log.exception("Odoo sale order creation failed: %s", exc)
                 import_messages.append(f"Odoo sale order creation failed: {exc}")
             finally:
-                if _ODOO_IMPORT_ENABLED:
-                    saw_warning = import_log_handler.saw_warning
-                    odoo_logger.removeHandler(import_log_handler)
-                    import_log_handler.close()
-                    if collected_logs:
-                        unique_messages: list[str] = []
-                        for entry in import_messages + collected_logs:
-                            if entry and entry not in unique_messages:
-                                unique_messages.append(entry)
-                        import_messages = unique_messages
-                        if saw_warning:
-                            log_path = Path(__file__).with_name("app_so_import.log")
-                            new_content = "\n".join(import_messages)
-                            if new_content:
-                                new_content = f"{new_content}\n"
-                            if log_path.exists():
-                                existing = log_path.read_text(encoding="utf-8")
-                                merged = f"{new_content}\n{existing}" if existing else new_content
-                            else:
-                                merged = new_content
-                            log_path.write_text(merged, encoding="utf-8")
+                saw_warning = import_log_handler.saw_warning
+                odoo_logger.removeHandler(import_log_handler)
+                import_log_handler.close()
+                if collected_logs:
+                    unique_messages: list[str] = []
+                    for entry in import_messages + collected_logs:
+                        if entry and entry not in unique_messages:
+                            unique_messages.append(entry)
+                    import_messages = unique_messages
+                    if saw_warning:
+                        log_path = Path(__file__).with_name("app_so_import.log")
+                        new_content = "\n".join(import_messages)
+                        if new_content:
+                            new_content = f"{new_content}\n"
+                        if log_path.exists():
+                            existing = log_path.read_text(encoding="utf-8")
+                            merged = f"{new_content}\n{existing}" if existing else new_content
+                        else:
+                            merged = new_content
+                        log_path.write_text(merged, encoding="utf-8")
         else:
             import_messages.append("Odoo import skipped: ODOO_IMPORT flag is not set to true.")
 
-    import_log_message = "\n".join(import_messages)
+    if created_order_name and created_order_id:
+        import_log_message = (
+            f"{created_order_name} \n"
+            f"https://ampco.odoo.com/odoo/sales/{created_order_id}"
+        )
+    elif import_messages:
+        import_log_message = "\n".join(import_messages)
+    else:
+        import_log_message = ""
     pdf_output = pdf_parsing_text
 
     return openai_po_response, pdf_output, import_log_message
