@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -9,12 +8,10 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("app_odoo")
 
-_NORMALIZE_PATTERN = re.compile(r"[\W_]+", re.UNICODE)
-
 # Normalize a raw string into a casefolded, alphanumeric token for comparison.
 # Example: _normalize_value(" ACME-123 ") -> "acme123"
 def _normalize_value(raw_value: str) -> str:
-    return _NORMALIZE_PATTERN.sub("", raw_value.casefold())
+    return "".join(ch for ch in raw_value.casefold() if ch.isalnum())
 
 
 def _select_candidate(
@@ -39,13 +36,12 @@ def _fetch_candidates_for_field(
     model: str,
     field: str,
     input_value: str,
-    limit: int,
 ) -> list[tuple[int, str, str]]:
     stripped_input = input_value.strip()
     candidates: list[tuple[int, str, str]] = []
     seen_ids: set[int] = set()
 
-    def add_records(records: list[dict[str, Any]]) -> bool:
+    def add_records(records: list[dict[str, Any]]) -> None:
         for record in records:
             record_id = int(record["id"])
             if record_id in seen_ids:
@@ -58,18 +54,16 @@ def _fetch_candidates_for_field(
                 continue
             candidates.append((record_id, normalized_value, str(raw_value)))
             seen_ids.add(record_id)
-            if len(candidates) >= limit:
-                return True
-        return False
 
     if stripped_input:
         exact_records = client.execute_kw(
             model,
             "search_read",
             [[[field, "=", stripped_input]]],
-            {"fields": [field], "limit": limit},
+            {"fields": [field]},
         )
-        if add_records(exact_records):
+        add_records(exact_records)
+        if candidates:
             return candidates
 
         for substring_length in range(len(stripped_input), 0, -1):
@@ -78,9 +72,10 @@ def _fetch_candidates_for_field(
                 model,
                 "search_read",
                 [[[field, "ilike", f"%{substring}%"]]],
-                {"fields": [field], "limit": limit},
+                {"fields": [field]},
             )
-            if add_records(substring_records):
+            add_records(substring_records)
+            if candidates:
                 return candidates
         if candidates:
             return candidates
@@ -92,10 +87,9 @@ def _fetch_candidates_for_field(
             model,
             "search_read",
             [[[field, "ilike", wildcard]]],
-            {"fields": [field], "limit": limit},
+            {"fields": [field]},
         )
-        if add_records(wildcard_records):
-            return candidates
+        add_records(wildcard_records)
         if candidates:
             return candidates
 
@@ -104,7 +98,7 @@ def _fetch_candidates_for_field(
             model,
             "search_read",
             [[[field, "ilike", stripped_input]]],
-            {"fields": [field], "limit": limit},
+            {"fields": [field]},
         )
         add_records(fuzzy_records)
 
@@ -117,15 +111,8 @@ def find_id(
     input_value: str,
     *,
     fields: list[str],
-    limit: int = 100,
 ) -> int:
-    if not fields:
-        raise ValueError("At least one field must be provided to locate record IDs.")
-    if not input_value:
-        raise ValueError("Input value is empty; unable to determine record ID.")
     normalized_input = _normalize_value(input_value)
-    if not normalized_input:
-        raise ValueError(f"Input '{input_value}' is invalid after normalization.")
     field_candidates: dict[str, list[tuple[int, str, str]]] = {}
     field_current: dict[str, list[tuple[int, str, str]]] = {}
     for field in fields:
@@ -134,15 +121,11 @@ def find_id(
             model,
             field,
             input_value,
-            limit,
         )
         if not candidates:
             continue
         field_candidates[field] = candidates
         field_current[field] = candidates
-
-    if not field_candidates:
-        raise ValueError(f"No '{model}' record matches '{input_value}'.")
 
     for window_end in range(len(normalized_input), 0, -1):
         window = normalized_input[:window_end]
@@ -187,8 +170,6 @@ def find_id(
                 input_value=input_value,
                 normalized_input=normalized_input,
             )
-
-    raise ValueError(f"No '{model}' record matches '{input_value}'.")
 
 
 __all__ = ["find_id"]
