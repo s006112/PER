@@ -189,12 +189,14 @@ def _resolve_with_fields(
     model: str,
     input_value: str,
     normalized_input: str,
+    min_window_size: int = 1,
 ) -> int | None:
     field_order = list(active_fields)
     if not field_order:
         return None
     normalized_length = len(normalized_input)
-    for window_size in range(normalized_length, 0, -1):
+    window_floor = max(1, min(min_window_size, normalized_length))
+    for window_size in range(normalized_length, window_floor - 1, -1):
         max_start = normalized_length - window_size
         for start_index in _iter_window_indices(max_start):
             window = normalized_input[start_index : start_index + window_size]
@@ -255,7 +257,8 @@ def find_id(
         raise ValueError(f"Input '{input_value}' is invalid after normalization.")
     field_candidates: dict[str, list[tuple[int, str, str]]] = {}
     processed_fields: list[str] = []
-    for field in fields:
+    total_fields = len(fields)
+    for index, field in enumerate(fields):
         candidates = _fetch_candidates_for_field(
             client,
             model,
@@ -279,12 +282,14 @@ def find_id(
                     normalized_input=normalized_input,
                 )
         processed_fields.append(field)
+        min_window_size = 1 if index == total_fields - 1 else len(normalized_input)
         resolved = _resolve_with_fields(
             field_candidates,
             processed_fields,
             model=model,
             input_value=input_value,
             normalized_input=normalized_input,
+            min_window_size=min_window_size,
         )
         if resolved is not None:
             return resolved
@@ -294,10 +299,11 @@ def find_id(
 
     resolved = _resolve_with_fields(
         field_candidates,
-        fields,
+        processed_fields or fields,
         model=model,
         input_value=input_value,
         normalized_input=normalized_input,
+        min_window_size=1,
     )
     if resolved is not None:
         return resolved
