@@ -14,21 +14,8 @@ def _normalize_value(raw_value: str) -> str:
     return "".join(ch for ch in raw_value.casefold() if ch.isalnum())
 
 
-def _select_candidate(
-    candidates: list[tuple[int, str, str]],
-    *,
-    model: str,
-    input_value: str,
-    normalized_input: str,
-) -> int:
-    selected_candidate = min(candidates, key=lambda item: (len(item[1]), item[1], item[0]))
-#    if selected_candidate[1] != normalized_input:
-#        log.warning(
-#            "[[%s]] not exactly found in Odoo system, replaced by [[%s]]",
-#            input_value,
-#            selected_candidate[2],
-#        )
-    return selected_candidate[0]
+# Select the best candidate by shortest normalized value, then lexicographic,
+# then smallest id. Kept inline where used to reduce indirection.
 
 
 def _fetch_candidates_for_field(
@@ -55,52 +42,24 @@ def _fetch_candidates_for_field(
             candidates.append((record_id, normalized_value, str(raw_value)))
             seen_ids.add(record_id)
 
-    if stripped_input:
-        exact_records = client.execute_kw(
+    def fetch(domain: list[list[Any]]) -> bool:
+        records = client.execute_kw(
             model,
             "search_read",
-            [[[field, "=", stripped_input]]],
+            [domain],
             {"fields": [field]},
         )
-        add_records(exact_records)
-        if candidates:
+        add_records(records)
+        return bool(candidates)
+
+    if stripped_input:
+        if fetch([[field, "=", stripped_input]]):
             return candidates
 
         for substring_length in range(len(stripped_input), 0, -1):
             substring = stripped_input[:substring_length]
-            substring_records = client.execute_kw(
-                model,
-                "search_read",
-                [[[field, "ilike", f"%{substring}%"]]],
-                {"fields": [field]},
-            )
-            add_records(substring_records)
-            if candidates:
+            if fetch([[field, "ilike", f"%{substring}%"]]):
                 return candidates
-        if candidates:
-            return candidates
-
-    normalized_input = _normalize_value(input_value)
-    if normalized_input:
-        wildcard = f"%{'%'.join(normalized_input)}%"
-        wildcard_records = client.execute_kw(
-            model,
-            "search_read",
-            [[[field, "ilike", wildcard]]],
-            {"fields": [field]},
-        )
-        add_records(wildcard_records)
-        if candidates:
-            return candidates
-
-    if stripped_input:
-        fuzzy_records = client.execute_kw(
-            model,
-            "search_read",
-            [[[field, "ilike", stripped_input]]],
-            {"fields": [field]},
-        )
-        add_records(fuzzy_records)
 
     return candidates
 
@@ -121,6 +80,18 @@ def find_id(
             model,
             field,
             input_value,
+        )
+        total_count = client.execute_kw(
+            model,
+            "search_count",
+            [[[field, "!=", False]]],
+        )
+        log.warning(
+            " %s | %s | fetched=%d | available=%d",
+            model,
+            field,
+            len(candidates),
+            total_count,
         )
         if not candidates:
             continue
@@ -164,12 +135,11 @@ def find_id(
             else:
                 field_current[field] = base_candidates
         if aggregated_candidates:
-            return _select_candidate(
-                list(aggregated_candidates.values()),
-                model=model,
-                input_value=input_value,
-                normalized_input=normalized_input,
+            selected = min(
+                aggregated_candidates.values(),
+                key=lambda item: (len(item[1]), item[1], item[0]),
             )
+            return selected[0]
 
 
 __all__ = ["find_id"]
