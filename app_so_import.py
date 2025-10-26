@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 import logging
 import os
@@ -194,12 +195,21 @@ def handle_upload(file_path: str, salesperson: str) -> Tuple[str, str, str]:
             import_messages.append("Odoo import skipped: ODOO_IMPORT flag is not set to true.")
 
     if created_order_name and created_order_id:
-        import_log_message = (
-            f"{created_order_name} \n"
-            f"https://ampco.odoo.com/odoo/sales/{created_order_id}"
-        )
+        order_url = f"https://ampco.odoo.com/odoo/sales/{created_order_id}"
+        escaped_url = html.escape(order_url, quote=True)
+        import_log_message = "".join([
+            '<a href="',
+            escaped_url,
+            '" target="_blank" rel="noopener noreferrer">',
+            "<strong>",
+            html.escape(created_order_name),
+            "</strong> (ID: ",
+            html.escape(created_order_id),
+            ")</a>",
+        ])
     elif import_messages:
-        import_log_message = "\n".join(import_messages)
+        escaped_messages = "<br><br>".join(html.escape(message) for message in import_messages if message)
+        import_log_message = f"<div>{escaped_messages}</div>" if escaped_messages else ""
     else:
         import_log_message = ""
     pdf_output = pdf_parsing_text
@@ -216,7 +226,7 @@ with gr.Blocks(title="SO importer", head=CLIPBOARD_POLYFILL) as demo:
         salesperson_input = gr.Textbox(label="Sales person", lines=1, placeholder="Enter sales person name")
     btn = gr.Button("Submit")
 
-    import_log_box = gr.Textbox(label="Import Log", lines=2, interactive=False)
+    import_log_box = gr.HTML(value="", elem_id="import_log_box")
 
     po_response_box = gr.Textbox(label="PO response", lines=14, show_copy_button=True, visible=_SHOW_PO_TEXTBOXES)
 
