@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import html
 import json
 import logging
 import os
 from pathlib import Path
-from typing import Tuple
 
 import gradio as gr
 from dotenv import load_dotenv
@@ -82,7 +80,7 @@ def query_openai_with_prompt(prompt_content: str, pdf_parsing_text: str) -> str:
 # Upload handler
 # ----------------------------
 
-def handle_upload(file_path: str, salesperson: str) -> Tuple[str, str, str]:
+def handle_upload(file_path: str, salesperson: str) -> tuple[str, str, str, dict]:
     """
     Gradio callback
     - Read PDF path, extract text
@@ -90,35 +88,38 @@ def handle_upload(file_path: str, salesperson: str) -> Tuple[str, str, str]:
     - Inject the manually provided salesperson name into the response
 
     Returns:
-      po_response_text (str), pdf_parsing_text (str), import_log (str)
+      po_response_text (str), pdf_parsing_text (str), import_log (str), order_link_update (dict)
     """
 
+    hidden_link_update = gr.update(value="", visible=False)
+    link_update = hidden_link_update
+
     if not salesperson or not salesperson.strip():
-        return "Error: Sales person is required.", "", ""
+        return "Error: Sales person is required.", "", "", hidden_link_update
 
     salesperson_value = salesperson.strip()
     if not _PO_RESPONSE_DEBUG:
         if not file_path or not os.path.isfile(file_path):
-            return "Error: No file found.", "", ""
+            return "Error: No file found.", "", "", hidden_link_update
 
     if _PO_RESPONSE_DEBUG:
         pdf_parsing_text = _DEBUG_PDF_PARSING_TEXT
         if not pdf_parsing_text:
-            return "Error: Debug mode requires pdf_parsing_text in .env.", "", ""
+            return "Error: Debug mode requires pdf_parsing_text in .env.", "", "", hidden_link_update
     else:
         with open(file_path, "rb") as f:
             data = f.read()
 
         pdf_pages = _extract_text_with_pymupdf(data)
         if not pdf_pages:
-            return "Error: PDF parsing failed.", "", ""
+            return "Error: PDF parsing failed.", "", "", hidden_link_update
         pdf_parsing_text = "\n\n".join(pdf_pages.values())
 
     base_dir = Path(__file__).parent
     try:
         prompt_po_str = (base_dir / "Prompt_po.txt").read_text("utf-8")
     except Exception as e:
-        return f"Error reading Prompt_po.txt: {e}", "", ""
+        return f"Error reading Prompt_po.txt: {e}", "", "", hidden_link_update
     openai_po_response = query_openai_with_prompt(prompt_po_str, pdf_parsing_text)
     import_messages: list[str] = []
     created_order_name: str | None = None
@@ -194,35 +195,20 @@ def handle_upload(file_path: str, salesperson: str) -> Tuple[str, str, str]:
         else:
             import_messages.append("Odoo import skipped: ODOO_IMPORT flag is not set to true.")
 
+    sale_order_link = ""
     if created_order_name and created_order_id:
-        order_url = f"https://ampco.odoo.com/odoo/sales/{created_order_id}"
-        escaped_url = html.escape(order_url, quote=True)
-        import_log_message = "".join([
-            '<a href="',
-            escaped_url,
-            '" target="_blank" rel="noopener noreferrer">',
-            "<strong>",
-            html.escape(created_order_name),
-            "</strong> (ID: ",
-            html.escape(created_order_id),
-            ")</a>",
-        ])
+        sale_order_link = f"https://ampco.odoo.com/odoo/sales/{created_order_id}"
+        import_log_message = (
+            f"{created_order_name} \n"
+        )
+        link_update = gr.update(value=f"[{sale_order_link}]({sale_order_link})", visible=True)
     elif import_messages:
-        escaped_messages = "<br><br>".join(html.escape(message) for message in import_messages if message)
-        import_log_message = f"<div>{escaped_messages}</div>" if escaped_messages else ""
+        import_log_message = "\n".join(import_messages)
     else:
         import_log_message = ""
     pdf_output = pdf_parsing_text
 
-    return openai_po_response, pdf_output, import_log_message
-
-
-def _start_processing() -> str:
-    return '<div class="status status-processing">Processing...</div>'
-
-
-def _finish_processing() -> str:
-    return '<div class="status status-complete">Completed.</div>'
+    return openai_po_response, pdf_output, import_log_message, link_update
 
 # ----------------------------
 # UI
@@ -234,8 +220,9 @@ with gr.Blocks(title="SO importer", head=CLIPBOARD_POLYFILL) as demo:
         salesperson_input = gr.Textbox(label="Sales person", lines=1, placeholder="Enter sales person name")
     btn = gr.Button("Submit")
 
-    status_box = gr.HTML(value="", elem_id="status_box", visible=not _SHOW_PO_TEXTBOXES)
-    import_log_box = gr.HTML(value="", elem_id="import_log_box")
+    order_link = gr.Markdown("", visible=False)
+
+    import_log_box = gr.Textbox(label="Import Log", lines=2, interactive=False)
 
     po_response_box = gr.Textbox(label="PO response", lines=14, show_copy_button=True, visible=_SHOW_PO_TEXTBOXES)
 
@@ -247,20 +234,11 @@ with gr.Blocks(title="SO importer", head=CLIPBOARD_POLYFILL) as demo:
         visible=_SHOW_PO_TEXTBOXES,
     )
 
-    # Wire outputs with basic progress indicator for non-debug mode
-    submit_event = btn.click(
-        _start_processing,
-        inputs=None,
-        outputs=status_box,
-    )
-    submit_event.then(
+    # Wire outputs: PO response (visible), raw PDF parsing text (hidden but copyable), import log, and sale link
+    btn.click(
         handle_upload,
         inputs=[inp, salesperson_input],
-        outputs=[po_response_box, pdf_parsing_box, import_log_box],
-    ).then(
-        _finish_processing,
-        inputs=None,
-        outputs=status_box,
+        outputs=[po_response_box, pdf_parsing_box, import_log_box, order_link],
     )
 
 if __name__ == "__main__":
