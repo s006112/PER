@@ -50,6 +50,218 @@ def query_openai_with_prompt(prompt_content: str, text: str) -> str:
     except Exception as e:
         return f"Error querying OpenAI: {e}"
 
+
+def insert_stats_rows(md: str) -> str:
+    """Insert Min/Max/Average rows into the first Product category table."""
+
+    if not md:
+        return md
+
+    lines = md.splitlines()
+    trailing_newline = md.endswith("\n")
+
+    # Locate the first "### Product category" heading.
+    heading_idx = None
+    for idx, line in enumerate(lines):
+        if line.strip().lower().startswith("###") and "product category" in line.lower():
+            heading_idx = idx
+            break
+    if heading_idx is None:
+        return md
+
+    # Find the first pipe table following the heading.
+    table_start = heading_idx + 1
+    while table_start < len(lines) and ("|" not in lines[table_start] or not lines[table_start].strip()):
+        table_start += 1
+    if table_start >= len(lines) or "|" not in lines[table_start]:
+        return md
+
+    table_end = table_start
+    while table_end < len(lines) and "|" in lines[table_end]:
+        table_end += 1
+
+    table_lines = lines[table_start:table_end]
+    if len(table_lines) < 2:
+        return md
+
+    header_line = table_lines[0]
+    separator_line = table_lines[1] if len(table_lines) > 1 else ""
+
+    def split_row(raw_line: str) -> List[str]:
+        cells = [cell.strip() for cell in raw_line.strip().strip("|").split("|")]
+        return cells
+
+    header_cells = split_row(header_line)
+    expected_headers = [
+        "Product Model",
+        "Product Number",
+        "Remarks",
+        "CCT (K)",
+        "Luminous Flux (lm)",
+        "Luminous Efficacy (lm/W)",
+        "Power (W)",
+        "Current (A)",
+        "Power Factor",
+        "Ra",
+        "R9",
+        "CIE 1931 (x, y)",
+    ]
+
+    if [cell.strip() for cell in header_cells] != expected_headers:
+        return md
+
+    def normalize_cells(cells: List[str]) -> List[str]:
+        if len(cells) < len(header_cells):
+            cells = cells + [""] * (len(header_cells) - len(cells))
+        elif len(cells) > len(header_cells):
+            cells = cells[: len(header_cells)]
+        return cells
+
+    data_lines = table_lines[2:]
+    data_rows: List[List[str]] = []
+    for raw in data_lines:
+        cells = normalize_cells(split_row(raw))
+        if all(re.fullmatch(r"-+", c or "") for c in cells):
+            continue
+        data_rows.append(cells)
+
+    if not data_rows:
+        return md
+
+    stats_labels = {"min", "max", "average"}
+    filtered_rows: List[List[str]] = []
+    for row in data_rows:
+        label = row[0].strip().lower()
+        if label in stats_labels:
+            continue
+        filtered_rows.append(row)
+
+    product_number_idx = header_cells.index("Product Number")
+    remarks_idx = header_cells.index("Remarks")
+
+    for idx, row in enumerate(filtered_rows, start=1):
+        row[product_number_idx] = f"#{idx}"
+
+    numeric_specs = {
+        "CCT (K)": {"idx": header_cells.index("CCT (K)"), "fmt": "int"},
+        "Luminous Flux (lm)": {"idx": header_cells.index("Luminous Flux (lm)"), "fmt": "int"},
+        "Luminous Efficacy (lm/W)": {"idx": header_cells.index("Luminous Efficacy (lm/W)"), "fmt": ".2f"},
+        "Power (W)": {"idx": header_cells.index("Power (W)"), "fmt": ".2f"},
+        "Current (A)": {"idx": header_cells.index("Current (A)"), "fmt": ".4f"},
+        "Power Factor": {"idx": header_cells.index("Power Factor"), "fmt": "pf"},
+        "Ra": {"idx": header_cells.index("Ra"), "fmt": ".1f"},
+        "R9": {"idx": header_cells.index("R9"), "fmt": ".1f"},
+    }
+
+    cie_idx = header_cells.index("CIE 1931 (x, y)")
+
+    numeric_values: dict[int, List[float]] = {spec["idx"]: [] for spec in numeric_specs.values()}
+    cie_values: List[Tuple[float, float]] = []
+
+    number_pattern = re.compile(r"[-+]?\d+(?:,\d{3})*(?:\.\d+)?")
+    cie_pattern = re.compile(r"([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)")
+
+    def parse_numeric(cell: str) -> float | None:
+        if not cell:
+            return None
+        cleaned = cell.replace("K", "").replace("k", "").strip()
+        match = number_pattern.search(cleaned)
+        if not match:
+            return None
+        try:
+            return float(match.group().replace(",", ""))
+        except ValueError:
+            return None
+
+    def parse_cie(cell: str) -> Tuple[float, float] | None:
+        if not cell:
+            return None
+        match = cie_pattern.search(cell)
+        if not match:
+            return None
+        try:
+            return float(match.group(1)), float(match.group(2))
+        except ValueError:
+            return None
+
+    for row in filtered_rows:
+        for spec in numeric_specs.values():
+            idx = spec["idx"]
+            if idx >= len(row):
+                continue
+            parsed = parse_numeric(row[idx])
+            if parsed is not None:
+                numeric_values[idx].append(parsed)
+        if cie_idx < len(row):
+            cie_pair = parse_cie(row[cie_idx])
+            if cie_pair is not None:
+                cie_values.append(cie_pair)
+
+    def format_stat(values: List[float], fmt: str, mode: str) -> str:
+        if not values:
+            return ""
+        if mode == "min":
+            result = min(values)
+        elif mode == "max":
+            result = max(values)
+        else:
+            result = sum(values) / len(values)
+        if fmt == "int":
+            return str(int(round(result)))
+        if fmt == "pf":
+            return f"{result:.4f}"
+        if isinstance(fmt, str) and fmt.startswith(".") and fmt.endswith("f") and fmt[1:-1].isdigit():
+            decimals = int(fmt[1:-1])
+            return f"{result:.{decimals}f}"
+        return f"{result:.2f}"
+
+    def format_cie(values: List[Tuple[float, float]], mode: str) -> str:
+        if not values:
+            return ""
+        xs = [pair[0] for pair in values]
+        ys = [pair[1] for pair in values]
+        if mode == "min":
+            x_val = min(xs)
+            y_val = min(ys)
+        elif mode == "max":
+            x_val = max(xs)
+            y_val = max(ys)
+        else:
+            x_val = sum(xs) / len(xs)
+            y_val = sum(ys) / len(ys)
+        return f"{x_val:.4f}, {y_val:.4f}"
+
+    def build_stat_row(label: str, mode: str) -> List[str]:
+        row = ["" for _ in header_cells]
+        row[0] = label
+        row[product_number_idx] = ""
+        row[remarks_idx] = ""
+        for spec in numeric_specs.values():
+            idx = spec["idx"]
+            row[idx] = format_stat(numeric_values[idx], spec["fmt"], mode)
+        row[cie_idx] = format_cie(cie_values, mode)
+        return row
+
+    stat_rows = [
+        build_stat_row("Min", "min"),
+        build_stat_row("Max", "max"),
+        build_stat_row("Average", "avg"),
+    ]
+
+    def join_row(cells: List[str]) -> str:
+        return "| " + " | ".join(cells) + " |"
+
+    rebuilt_lines = [header_line, separator_line]
+    for row in filtered_rows:
+        rebuilt_lines.append(join_row(row))
+    for row in stat_rows:
+        rebuilt_lines.append(join_row(row))
+
+    updated_lines = lines[:table_start] + rebuilt_lines + lines[table_end:]
+    result = "\n".join(updated_lines)
+    if trailing_newline:
+        return result + "\n"
+    return result
 # ----------------------------
 # Upload handler
 # ----------------------------
@@ -91,7 +303,8 @@ def handle_upload(file_path: str) -> Tuple[str, List[List[float | str]], str, st
         return f"Error reading Prompt_summary.txt: {e}", [], ""
 
     openai_md_response = query_openai_with_prompt(prompt_md_str, text)
-    openai_summary_response = query_openai_with_prompt(prompt_summary_str, openai_md_response)
+    updated_md = insert_stats_rows(openai_md_response)
+    openai_summary_response = query_openai_with_prompt(prompt_summary_str, updated_md)
 
     # Standard header for combined summary
     now = datetime.now()
@@ -137,7 +350,7 @@ def handle_upload(file_path: str) -> Tuple[str, List[List[float | str]], str, st
         "- [ ] \n"
         "- [ ] \n"
         "---\n"
-        f"{openai_md_response}\n\n"
+        f"{updated_md}\n\n"
         f"{footer_block}"
     )
 
@@ -239,7 +452,7 @@ def handle_upload(file_path: str) -> Tuple[str, List[List[float | str]], str, st
         except Exception:
             return []
 
-    cct_xy = _extract_cct_xy(openai_md_response)
+    cct_xy = _extract_cct_xy(updated_md)
 
     return combined_summary, cct_xy, text, png_filename
 
