@@ -9,7 +9,7 @@ PyMuPDF parsed text blocks with reading order and table structures (rows, column
 
 Field Mapping for Odoo:
 - Customer: Always consider header, unless obvious contradiction with the context.
-- Company: Always appeared as "Ampco", or non header name, or from Company/Supplier/Vendor section.
+- Company: Always non header name, or from Company/Supplier/Vendor section.
 - Customer PO Number: Always from PO No./Customer PO Number/Purchase Order No.
 - Product: From Item/Product Code/Part No.; keep only short code, description.
 - Quantity: From Qty/QTY/Quantity Ordered; numeric only.
