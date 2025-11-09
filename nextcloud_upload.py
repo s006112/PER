@@ -10,7 +10,8 @@ import requests
 from dotenv import load_dotenv
 
 _BASE_URL = "https://nextcloud.ampco.com.hk"
-_PDF_REMOTE_DIR = "/Documents/PER/Photometry Report"
+_PEF_REMOTE_DIR = "/Documents/PER/Photometry Report"
+_PO_REMOTE_DIR = "/Documents/SO_Backup"
 _OCS_HEADERS = {
     "OCS-APIRequest": "true",
     "Accept": "application/json",
@@ -175,7 +176,12 @@ def create_or_get_public_share(base_url: str, auth: Tuple[str, str], remote_path
 
 def share(local_path: str) -> Dict[str, str]:
     """Upload a file and return its public share links."""
-    return share_file(local_path, _PDF_REMOTE_DIR)
+    return share_file(local_path, _PEF_REMOTE_DIR)
+
+
+def share_po(local_path: str) -> Dict[str, str]:
+    """Upload a file to the SO backup directory and return share data."""
+    return share_file(local_path, _PO_REMOTE_DIR)
 
 
 def share_file(local_path: str, remote_dir: str) -> Dict[str, str]:

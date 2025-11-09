@@ -11,6 +11,7 @@ from openai import OpenAI
 
 from app_odoo import attach_pdf_to_sale_order, create_sale_order_from_text
 from chunk_pdf import _extract_text_with_pymupdf
+from nextcloud_upload import share_po
 
 from clipboard_polyfill import CLIPBOARD_POLYFILL
 
@@ -132,6 +133,17 @@ def handle_upload(file_path: str, salesperson: str) -> tuple[str, str, str, dict
         salesperson_literal = json.dumps(salesperson_value)
         header_line = f"self.salesperson = {salesperson_literal}"
         openai_po_response = f"{header_line}\n{sanitized_response}" if sanitized_response else header_line
+        if not _PO_RESPONSE_DEBUG and file_path and os.path.isfile(file_path):
+            try:
+                share_info = share_po(file_path) or {}
+                remote_path = share_info.get("remote_path")
+                link = share_info.get("page") or remote_path
+                if link:
+                    import_messages.append(f"Nextcloud upload: {link}")
+                log.info("Uploaded PO file to Nextcloud: %s", remote_path or file_path)
+            except Exception as nextcloud_exc:  # noqa: BLE001 - surface in UI log
+                log.error("Nextcloud upload failed: %s", nextcloud_exc)
+                import_messages.append(f"Nextcloud upload failed: {nextcloud_exc}")
         if _ODOO_IMPORT_ENABLED:
             try:
                 collected_logs: list[str] = []
