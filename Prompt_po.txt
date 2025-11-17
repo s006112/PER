@@ -24,8 +24,8 @@ Extraction Rules:
 - Final output must contain all mandatory fields (company, customer, PO number, and at least one valid order line) or be considered incomplete.
 
 Additional data rules:
-- The value of self.customer must never be "Ampco" or any variation of it; if such a value appears, treat it as a mix-up between company and customer names—use other contextual clues to correctly identify the customer
-- If the text includes ‘Good Earth Lighting’, assign it to self.customer.
+- Only when the raw text contains ‘Good Earth Lighting’, assign it to self.customer.
+- The value of self.customer must never be "Ampco" or any variation of it; if such a value appears, treat it as a mix-up between self.company and self.customer names—use other contextual clues to correctly identify the self.customer
 
 Output: 
 Output: A single continuous plain-text document containing only parsed content (no metadata, JSON, XML, CSV, or page markers).
@@ -52,3 +52,4 @@ Output format (exact order and structure, example in "" for illustration only):
         },
     ]
     … continue numbering sequentially for all product present
+

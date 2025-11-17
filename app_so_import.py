@@ -121,7 +121,7 @@ def handle_upload(file_path: str, salesperson: str) -> tuple[str, str, str, dict
         prompt_po_str = (base_dir / "Prompt_po.txt").read_text("utf-8")
     except Exception as e:
         return f"Error reading Prompt_po.txt: {e}", "", "", hidden_link_update
-    openai_po_response = query_openai_with_prompt(prompt_po_str, pdf_parsing_text)
+    openai_po_response = query_openai_with_prompt(pdf_parsing_text, prompt_po_str)
     import_messages: list[str] = []
     created_order_name: str | None = None
     created_order_id: str | None = None
