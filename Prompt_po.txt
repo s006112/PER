@@ -11,7 +11,7 @@ Field Mapping for Odoo:
 - Customer: Always consider header, unless obvious contradiction with the context.
 - Company: Always non header name, or from Company/Supplier/Vendor section.
 - Customer PO Number: Always from PO No./Customer PO Number/Purchase Order No.
-- Product: From Item/Product Code/Part No.; keep only short code, description.
+- Product: From Item/Product Code/Part No.; 忽略或不拼接长描述字段（如详细说明、技术规格），只保留产品短码
 - Quantity: From Qty/QTY/Quantity Ordered; numeric only.
 - Delivery Date: From Requested/Required/Ship/Delivery Date; standardize to YYYY-MM-DD.
 
