@@ -25,7 +25,7 @@ Extraction Rules:
 
 Additional data rules:
 - Only when the raw text contains ‘Good Earth Lighting’, assign it to self.customer.
-- The value of self.customer must never be "Ampco" or any variation of it; if such a value appears, treat it as a mix-up between self.company and self.customer names—use other contextual clues to correctly identify the self.customer
+- The value of self.customer must never be "Ampco Products", nor "Lighting Products" nor any variation of it; if such a value appears, treat it as a mix-up between self.company and self.customer names—use other contextual clues to correctly identify the self.customer
 
 Output: 
 Output: A single continuous plain-text document containing only parsed content (no metadata, JSON, XML, CSV, or page markers).
