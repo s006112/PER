@@ -3,15 +3,20 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from pathlib import Path
 
 import gradio as gr
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from app_odoo import attach_pdf_to_sale_order, create_sale_order_from_text
+from app_odoo import attach_pdf_to_sale_order, create_sale_order_from_text, get_odoo_client, parse_po_response_text
 from chunk_pdf import _extract_text_with_pymupdf
-from nextcloud_upload import share_po
+from nextcloud_upload import share_file, share_po
+try:
+    from nextcloud_upload import _PO_REMOTE_DIR as _SO_BACKUP_REMOTE_DIR
+except ImportError:  # pragma: no cover - fallback if constant renamed
+    _SO_BACKUP_REMOTE_DIR = "/Documents/SO_Backup"
 
 from clipboard_polyfill import CLIPBOARD_POLYFILL
 
@@ -77,6 +82,57 @@ def query_openai_with_prompt(prompt_content: str, pdf_parsing_text: str) -> str:
     except Exception as e:
         return f"Error querying OpenAI: {e}"
 
+
+_FOLDER_SANITIZE_PATTERN = re.compile(r"[^\w\s-]")
+_DEFAULT_CUSTOMER_FOLDER = "Customer"
+
+
+def _sanitize_customer_folder_name(raw_name: str) -> str:
+    normalized = raw_name.replace(".", " ")
+    normalized = _FOLDER_SANITIZE_PATTERN.sub("", normalized)
+    normalized = re.sub(r"\s+", "_", normalized).strip("_")
+    return normalized or _DEFAULT_CUSTOMER_FOLDER
+
+
+def _lookup_res_partner_name(customer_value: str) -> str | None:
+    if not customer_value:
+        return None
+    try:
+        client = get_odoo_client()
+    except Exception as exc:  # noqa: BLE001 - best effort lookup
+        log.debug("Skipping res.partner lookup for '%s': %s", customer_value, exc)
+        return None
+
+    try:
+        records = client.execute_kw(
+            "res.partner",
+            "search_read",
+            [[["name", "ilike", customer_value]]],
+            {"fields": ["name"], "limit": 1},
+        )
+    except Exception as exc:  # noqa: BLE001 - surfacing in logs is enough
+        log.warning("res.partner lookup failed for '%s': %s", customer_value, exc)
+        return None
+    if not records:
+        return None
+    resolved_name = str(records[0].get("name") or "").strip()
+    return resolved_name or None
+
+
+def _determine_customer_remote_dir(po_response_text: str) -> str | None:
+    try:
+        po_data = parse_po_response_text(po_response_text)
+    except ValueError as exc:
+        log.debug("Unable to parse PO response for customer folder: %s", exc)
+        return None
+    customer_field = str(po_data.get("customer") or "").strip()
+    if not customer_field:
+        return None
+    partner_name = _lookup_res_partner_name(customer_field) or customer_field
+    sanitized = _sanitize_customer_folder_name(partner_name)
+    base = _SO_BACKUP_REMOTE_DIR.rstrip("/")
+    return f"{base}/{sanitized}" if base else sanitized
+
 # ----------------------------
 # Upload handler
 # ----------------------------
@@ -133,9 +189,14 @@ def handle_upload(file_path: str, salesperson: str) -> tuple[str, str, str, dict
         salesperson_literal = json.dumps(salesperson_value)
         header_line = f"self.salesperson = {salesperson_literal}"
         openai_po_response = f"{header_line}\n{sanitized_response}" if sanitized_response else header_line
+        customer_remote_dir = _determine_customer_remote_dir(openai_po_response)
         if not _PO_RESPONSE_DEBUG and file_path and os.path.isfile(file_path):
             try:
-                share_info = share_po(file_path) or {}
+                share_info = (
+                    share_file(file_path, customer_remote_dir)
+                    if customer_remote_dir
+                    else share_po(file_path)
+                ) or {}
                 remote_path = share_info.get("remote_path")
                 link = share_info.get("page") or remote_path
                 if link:
