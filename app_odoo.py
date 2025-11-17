@@ -12,6 +12,7 @@ from xmlrpc import client as xmlrpc_client
 
 from dotenv import load_dotenv
 from app_odoo_id import find_id
+from nextcloud_upload import _PO_REMOTE_DIR, share_file
 
 load_dotenv()
 
@@ -119,6 +120,45 @@ def parse_quantity(raw_value: str) -> float:
     if not match:
         raise ValueError(f"Invalid quantity: '{raw_value}'")
     return float(match.group())
+
+
+def _resolve_partner_name(client: OdooClient, order_id: int) -> str | None:
+    try:
+        records = client.execute_kw(
+            "sale.order",
+            "read",
+            [[order_id], ["partner_id"]],
+        )
+    except Exception as exc:
+        log.warning("Unable to read partner for sale.order %s: %s", order_id, exc)
+        return None
+    if not records:
+        return None
+    partner = records[0].get("partner_id")
+    if not partner or not isinstance(partner, (list, tuple)) or len(partner) < 2:
+        return None
+    return str(partner[1]).strip()
+
+
+def _upload_pdf_to_nextcloud(client: OdooClient, order_id: int, pdf_path: str) -> list[str]:
+    messages: list[str] = []
+    partner_name = _resolve_partner_name(client, order_id)
+    if not partner_name:
+        return messages
+    base_dir = _PO_REMOTE_DIR.rstrip("/") if _PO_REMOTE_DIR else ""
+    remote_dir = f"{base_dir}/{partner_name}" if base_dir else partner_name
+    try:
+        share_info = share_file(pdf_path, remote_dir) or {}
+        remote_path = share_info.get("remote_path")
+        link = share_info.get("page") or remote_path
+        if link:
+            messages.append(f"Nextcloud upload: {link}")
+        log.info("Uploaded PO file to Nextcloud: %s", remote_path or pdf_path)
+    except Exception as exc:
+        log.error("Nextcloud upload failed: %s", exc)
+        messages.append(f"Nextcloud upload failed: {exc}")
+    return messages
+
 
 
 
@@ -237,6 +277,9 @@ def attach_pdf_to_sale_order(
     sale_order_identifier: str,
     pdf_path: str,
     note_body: str = "Attached customer PO",
+    *,
+    upload_to_nextcloud: bool = False,
+    status_log: list[str] | None = None,
 ) -> int:
     client = get_odoo_client()
     order_id = find_id(client, "sale.order", sale_order_identifier, fields=["name"])
@@ -275,6 +318,10 @@ def attach_pdf_to_sale_order(
         order_id,
         attachment_id,
     )
+    if upload_to_nextcloud:
+        nextcloud_messages = _upload_pdf_to_nextcloud(client, order_id, pdf_path_clean)
+        if status_log and nextcloud_messages:
+            status_log.extend(nextcloud_messages)
     return attachment_id
 
 
