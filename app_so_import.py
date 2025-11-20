@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 from app_odoo import attach_pdf_to_sale_order, create_sale_order_from_text
-from chunk_pdf import _extract_text_with_pymupdf
+from chunk_pdf import extract_text_from_pdf_bytes
 
 from clipboard_polyfill import CLIPBOARD_POLYFILL
 
@@ -63,13 +63,17 @@ class _ImportLogHandler(logging.Handler):
 def query_openai_with_prompt(prompt_content: str, pdf_parsing_text: str) -> str:
     try:
         if "{context}" in prompt_content:
-            final_prompt = prompt_content.replace("{context}", pdf_parsing_text)
+            final_user_prompt = prompt_content.replace("{context}", pdf_parsing_text)
+            messages = [{"role": "user", "content": final_user_prompt}]
         else:
-            final_prompt = f"{prompt_content}\n\n{pdf_parsing_text}"
+            messages = [
+                {"role": "system", "content": prompt_content},
+                {"role": "user", "content": pdf_parsing_text},
+            ]
 
         resp = client.chat.completions.create(
             model="gpt-4.1-mini",
-            messages=[{"role": "user", "content": final_prompt}],
+            messages=messages,
             temperature=0.0,
         )
         return (resp.choices[0].message.content or "").strip()
@@ -110,17 +114,23 @@ def handle_upload(file_path: str, salesperson: str) -> tuple[str, str, str, dict
         with open(file_path, "rb") as f:
             data = f.read()
 
-        pdf_pages = _extract_text_with_pymupdf(data)
+        pdf_pages = extract_text_from_pdf_bytes(data, Path(file_path).name)
         if not pdf_pages:
             return "Error: PDF parsing failed.", "", "", hidden_link_update
-        pdf_parsing_text = "\n\n".join(pdf_pages.values())
+        pdf_parsing_text = "\n\n".join(
+            f"[Page {page_no}]\n{text.strip()}"
+            for page_no, text in sorted(pdf_pages.items())
+            if text and text.strip()
+        )
+        if not pdf_parsing_text:
+            return "Error: PDF parsing produced empty text.", "", "", hidden_link_update
 
     base_dir = Path(__file__).parent
     try:
         prompt_po_str = (base_dir / "Prompt_po.txt").read_text("utf-8")
     except Exception as e:
         return f"Error reading Prompt_po.txt: {e}", "", "", hidden_link_update
-    openai_po_response = query_openai_with_prompt(pdf_parsing_text, prompt_po_str)
+    openai_po_response = query_openai_with_prompt(prompt_po_str, pdf_parsing_text)
     import_messages: list[str] = []
     created_order_name: str | None = None
     created_order_id: str | None = None
