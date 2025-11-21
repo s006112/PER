@@ -6,11 +6,13 @@ import inspect
 import json
 import logging
 import tempfile
+import io
 from pathlib import Path
 from typing import Callable, List, Tuple
 
 import fitz  # PyMuPDF：用於處理 PDF 文件的主要函式庫
 import ocrmypdf  # OCR fallback for image-based PDFs
+from PIL import Image, ImageFilter, ImageOps
 
 logger = logging.getLogger(__name__)  # 初始化日誌記錄器
 
@@ -53,6 +55,29 @@ def _extract_text_with_pymupdf(data: bytes) -> dict[int, str]:
     return _extract_text_with_ocr_fallback(data, _run_extraction)
 
 
+def _preprocess_pdf_background(data: bytes) -> bytes | None:
+    """以簡單濾鏡方式降低紙張背景噪點。"""
+    try:
+        with fitz.open(stream=data, filetype="pdf") as src, fitz.open() as dst:
+            zoom = fitz.Matrix(300 / 72, 300 / 72)
+            for page in src:
+                pix = page.get_pixmap(matrix=zoom, alpha=False)
+                mode = "RGB" if pix.n > 1 else "L"
+                img = Image.frombytes(mode, [pix.width, pix.height], pix.samples)
+                gray = ImageOps.grayscale(img)
+                gray = ImageOps.autocontrast(gray, cutoff=4)
+                gray = gray.filter(ImageFilter.MedianFilter(size=3))
+                gray = gray.point(lambda x, t=210: 255 if x > t else int(x * 0.8))
+                buf = io.BytesIO()
+                gray.save(buf, format="PNG")
+                new_page = dst.new_page(width=page.rect.width, height=page.rect.height)
+                new_page.insert_image(new_page.rect, stream=buf.getvalue())
+            return dst.tobytes()
+    except Exception as exc:
+        logger.debug("Background preprocessing skipped: %s", exc)
+        return None
+
+
 def _extract_text_with_ocr_fallback(
     data: bytes,
     extractor: Callable[[bytes], dict[int, str]],
@@ -62,13 +87,18 @@ def _extract_text_with_ocr_fallback(
         with tempfile.TemporaryDirectory() as tmpdir:
             src_path = Path(tmpdir, "source.pdf")
             ocr_path = Path(tmpdir, "ocr.pdf")
-            src_path.write_bytes(data)
+            preprocessed = _preprocess_pdf_background(data)
+            src_path.write_bytes(preprocessed or data)
             # Run OCR to produce a searchable PDF; force OCR to avoid Ghostscript regression with skip_text.
             ocrmypdf.ocr(
                 str(src_path),
                 str(ocr_path),
                 output_type="pdf",
                 force_ocr=True,
+                rotate_pages=True,
+                deskew=True,
+                oversample=300,
+                optimize=1,
             )
             ocr_bytes = ocr_path.read_bytes()
         pages = extractor(ocr_bytes)
