@@ -3,8 +3,8 @@
 
 from __future__ import annotations
 import inspect
+import json
 import logging
-import os
 import tempfile
 from pathlib import Path
 from typing import Callable, List, Tuple
@@ -33,83 +33,47 @@ def _infer_filename_from_stack() -> str | None:
 def _extract_text_with_pymupdf(data: bytes) -> dict[int, str]:
     """使用 PyMuPDF 將 PDF 二進位資料轉換為 {頁碼: 淨化後文字} 的字典。"""
 
-    def _run_extraction(pdf_bytes: bytes) -> tuple[dict[int, str], set[int], int]:
+    def _run_extraction(pdf_bytes: bytes) -> dict[int, str]:
         with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
             pages: dict[int, str] = {}
-            empty_pages: set[int] = set()
             for idx, page in enumerate(doc, start=1):
                 text = page.get_text()
                 if text and text.strip():
                     pages[idx] = text
-                else:
-                    empty_pages.add(idx)
-            return pages, empty_pages, doc.page_count
+            return pages
 
     try:
-        pages, empty_pages, total_pages = _run_extraction(data)
-        if pages and not empty_pages:
+        pages = _run_extraction(data)
+        if pages:
             return pages
-        force_full = not pages
-        if force_full:
-            logger.info("PyMuPDF extracted no text, attempting OCR fallback.")
-        else:
-            logger.info(
-                "PyMuPDF missing text on %d/%d page(s); attempting targeted OCR.",
-                len(empty_pages),
-                total_pages,
-            )
-        return _extract_text_with_ocr_fallback(
-            data,
-            _run_extraction,
-            force_full=force_full,
-            missing_pages=empty_pages,
-        )
+        # PyMuPDF returned no text; fall back to OCR once.
+        logger.info("PyMuPDF extracted no text, attempting OCR fallback.")
     except Exception as exc:
         logger.error("Extraction failed: %s", exc)
-        return _extract_text_with_ocr_fallback(data, _run_extraction, force_full=True)
+    return _extract_text_with_ocr_fallback(data, _run_extraction)
 
 
 def _extract_text_with_ocr_fallback(
     data: bytes,
-    extractor: Callable[[bytes], tuple[dict[int, str], set[int], int]],
-    *,
-    force_full: bool = False,
-    missing_pages: set[int] | None = None,
+    extractor: Callable[[bytes], dict[int, str]],
 ) -> dict[int, str]:
     """使用 OCR 產生可搜尋 PDF 後重新提取文字。"""
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             src_path = Path(tmpdir, "source.pdf")
             ocr_path = Path(tmpdir, "ocr.pdf")
-            sidecar_path = Path(tmpdir, "ocr.txt")
             src_path.write_bytes(data)
-            jobs = max(1, (os.cpu_count() or 2) - 1)
+            # Run OCR to produce a searchable PDF; force OCR to avoid Ghostscript regression with skip_text.
             ocrmypdf.ocr(
                 str(src_path),
                 str(ocr_path),
                 output_type="pdf",
-                language="eng",
-                deskew=True,
-                rotate_pages=True,
-                clean=False,
-                optimize=0,
-                force_ocr=force_full,
-                skip_text=not force_full,
-                tesseract_timeout=120,
-                jobs=jobs,
-                progress_bar=False,
-                sidecar=str(sidecar_path),
+                force_ocr=True,
             )
             ocr_bytes = ocr_path.read_bytes()
-        pages, _, _ = extractor(ocr_bytes)
+        pages = extractor(ocr_bytes)
         if pages:
-            if missing_pages:
-                logger.info(
-                    "OCR fallback recovered text for %d page(s).",
-                    len(missing_pages),
-                )
-            else:
-                logger.info("OCR fallback succeeded.")
+            logger.info("OCR fallback succeeded.")
             return pages
         logger.warning("OCR fallback produced no text.")
     except Exception as exc:

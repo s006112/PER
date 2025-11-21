@@ -72,9 +72,8 @@ def query_openai_with_prompt(prompt_content: str, pdf_parsing_text: str) -> str:
             ]
 
         resp = client.chat.completions.create(
-            model="gpt-4.1-mini",
+            model="gpt-5-mini",
             messages=messages,
-            temperature=0.0,
         )
         return (resp.choices[0].message.content or "").strip()
     except Exception as e:
